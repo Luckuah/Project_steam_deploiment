@@ -1,0 +1,7 @@
+load_col:
+  inter: [user, app_id]
+ITEM_ID_FIELD: app_id
+USER_ID_FIELD: user
+
+
+warm_up_step: 40

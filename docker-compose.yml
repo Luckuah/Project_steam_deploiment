@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: steam_app
+    depends_on:
+      - mongo
+    ports:
+      - "8501:8501"      # Streamlit
+      # - "27099:27099"  # optional API exposure
+    environment:
+      - API_BASE_PORT=27099
+      - RUN_DB_IMPORT=1
+
+      - DB_USER=User
+      - DB_PASSWORD=Pass
+      - DB_IP=mongo
+      - DB_PORT=27017
+      - DB_NAME=Steam_Project
+    volumes:
+      - init-state:/init-state
+
+  mongo:
+    image: mongo:7
+    container_name: steam_mongo
+    restart: always
+    command: ["mongod", "--bind_ip_all", "--auth"]
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=User
+      - MONGO_INITDB_ROOT_PASSWORD=Pass
+      - MONGO_INITDB_DATABASE=Steam_Project
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
+  init-state:
