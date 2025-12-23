@@ -30,7 +30,7 @@ RUN mkdir -p src \
 'API_BASE_PORT=27099' \
 'DB_USER=User' \
 'DB_PASSWORD=Pass' \
-'DB_IP=mongo' \
+'DB_IP=mongo.steam.internal' \
 'DB_PORT=27017' \
 'DB_NAME=Steam_Project' > src/.env; \
     fi

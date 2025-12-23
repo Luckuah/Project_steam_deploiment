@@ -1,0 +1,74 @@
+name: deploy-aws
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aws
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Test AWS Identity
+        run: aws sts get-caller-identity
+
+      - name: Test AWS Connection
+        run: |
+          echo "✅ Connected to AWS successfully!"
+          echo "Account ID: $(aws sts get-caller-identity --query Account --output text)"
+          echo "User ARN: $(aws sts get-caller-identity --query Arn --output text)"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Create S3 Backend Bucket
+        run: |
+          aws s3api create-bucket \
+            --bucket terraform-state-g2-mg03 \
+            --region eu-west-3 \
+            --create-bucket-configuration LocationConstraint=eu-west-3 \
+            2>/dev/null || echo "Bucket already exists"
+
+          aws s3api put-bucket-versioning \
+            --bucket terraform-state-g2-mg03 \
+            --versioning-configuration Status=Enabled
+
+          aws s3api put-bucket-encryption \
+            --bucket terraform-state-g2-mg03 \
+            --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ./terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Terraform Output
+        working-directory: ./terraform
+        run: |
+          echo "========================================="
+          echo "Infrastructure Created Successfully!"
+          echo "========================================="
+          echo "ECS Cluster ARN: $(terraform output -raw ecs_cluster_arn)"
+          echo "ECR Repository URL: $(terraform output -raw ecr_repository_url)"
