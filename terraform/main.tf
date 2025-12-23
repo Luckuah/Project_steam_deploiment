@@ -9,9 +9,9 @@ terraform {
   }
 
   backend "s3" {
-    bucket  = var.s3_bucket_name
+    bucket  = "terraform-state-g2-mg03" # Nom réel du bucket
     key     = "infrastructure/terraform.tfstate"
-    region  = var.region
+    region  = "eu-west-3"               # Région réelle
     encrypt = true
   }
 }
