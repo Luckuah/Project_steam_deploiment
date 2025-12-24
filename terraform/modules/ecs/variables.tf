@@ -36,3 +36,13 @@ variable "vpc_id" {
   type        = string
   description = "VPC ID where ECS and Cloud Map will reside"
 }
+
+variable "ecs_sg_id" {
+  type        = string
+  description = "Le SG de MongoDB"
+}
+
+variable "apprunner_sg_id" {
+  type        = string
+  description = "Le SG utilisé par le VPC Connector"
+}
