@@ -78,6 +78,8 @@ module "ecs_G2MG03" {
   vpc_id             = module.vpc_G2MG03.vpc_id
   subnet_ids         = module.vpc_G2MG03.private_subnets
   security_group_ids = [aws_security_group.mongo_sg.id] # <-- Utilisation de la ressource créée au dessus
+  ecs_sg_id          = aws_security_group.mongo_sg.id
+  apprunner_sg_id    = aws_security_group.mongo_sg.id
 }
 
 # 6. Module App Runner
