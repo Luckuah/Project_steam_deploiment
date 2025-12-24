@@ -33,3 +33,15 @@ variable "ecs_cluster_name" {
   type        = string
   default     = "ecs-g2-mg03"
 }
+
+variable "ecs_sg_id" {
+  description = "ID du Security Group pour MongoDB (à remplir après création ou via data source)"
+  type        = string
+  default     = ""l
+}
+
+variable "service_name" {
+  description = "Nom du service App Runner"
+  type        = string
+  default     = "app-steam-g2-mg03"
+}
