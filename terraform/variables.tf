@@ -37,7 +37,7 @@ variable "ecs_cluster_name" {
 variable "ecs_sg_id" {
   description = "ID du Security Group pour MongoDB (à remplir après création ou via data source)"
   type        = string
-  default     = ""l
+  default     = ""
 }
 
 variable "service_name" {
