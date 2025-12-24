@@ -59,12 +59,6 @@ resource "aws_security_group" "mongo_sg" {
   }
 }
 
-# 3. Module S3
-module "s3_G2MG03" {
-  source      = "./modules/s3"
-  bucket_name = var.s3_bucket_name
-}
-
 # 4. Module ECR
 module "ecr_G2MG03" {
   source    = "./modules/ecr"
