@@ -1,6 +1,6 @@
 output "s3_bucket_name" {
   description = "Nom du bucket S3 utilisé par Terraform"
-  value       = = var.s3_bucket_name
+  value       =  var.s3_bucket_name
 }
 
 output "ecr_repository_url" {
