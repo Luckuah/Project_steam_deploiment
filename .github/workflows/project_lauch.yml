@@ -12,6 +12,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
             lfs: true
+            fetch-depth: 0
+
+      - name: Force LFS Pull and Verify
+        run: |
+          git lfs install
+          git lfs pull
+          # VERIFICATION : On regarde si le fichier contient "version https"
+          if grep -q "version https" src/NLGCL/dataset/game/game.inter; then
+            echo "❌ ERREUR : Les fichiers LFS sont encore des pointeurs !"
+            exit 1
+          else
+            echo "✅ SUCCÈS : Les vraies données sont prêtes pour le build."
+          fi
+
+      - name: Build, tag, and push image to Amazon ECR
+        run: |
+          REPO_URL=$(terraform -chdir=./terraform output -raw ecr_repository_url)
+          # On ajoute --no-cache pour être sûr de ne pas reprendre les pointeurs
+          docker build --no-cache -t $REPO_URL:latest .
+          docker push $REPO_URL:latest
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
