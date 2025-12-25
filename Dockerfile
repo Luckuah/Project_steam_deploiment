@@ -38,6 +38,8 @@ RUN mkdir -p src \
 # Create uv venv and install Python dependencies at build time
 RUN uv venv .venv -p 3.13.7 && \
     uv pip install -r requirements.txt
+    
+RUN uv pip install boto3 requests pymongo rich
 
 # Expose app ports
 EXPOSE 8501
