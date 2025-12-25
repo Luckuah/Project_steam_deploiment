@@ -239,6 +239,10 @@ def load_games_array(games_json_path: Path) -> List[dict]:
     return data
 
 def import_games(db, build_indexes: bool = False):
+    if GAMES_JSON_PATH.exists() and GAMES_JSON_PATH.stat().st_size == 0:
+        logger.warning("[games] games.json est vide, suppression...")
+        GAMES_JSON_PATH.unlink()
+        ensure_games_json_present()
     col = db[GAMES_COLLECTION]
     logger.info("[games] Target collection: %s", GAMES_COLLECTION)
 
