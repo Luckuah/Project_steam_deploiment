@@ -9,30 +9,31 @@ jobs:
     environment: aws
 
     steps:
+      # 1. Récupération du code avec LFS
       - uses: actions/checkout@v4
         with:
-            lfs: true
-            fetch-depth: 0
+          lfs: true
+          fetch-depth: 0
 
+      # 2. Forcer le téléchargement des données réelles
       - name: Force LFS Pull and Verify
         run: |
           git lfs install
           git lfs pull
-          # VERIFICATION : On regarde si le fichier contient "version https"
           if grep -q "version https" src/NLGCL/dataset/game/game.inter; then
             echo "❌ ERREUR : Les fichiers LFS sont encore des pointeurs !"
             exit 1
           else
-            echo "✅ SUCCÈS : Les vraies données sont prêtes pour le build."
+            echo "✅ SUCCÈS : Données réelles téléchargées."
           fi
 
-      - name: Build, tag, and push image to Amazon ECR
-        run: |
-          REPO_URL=$(terraform -chdir=./terraform output -raw ecr_repository_url)
-          # On ajoute --no-cache pour être sûr de ne pas reprendre les pointeurs
-          docker build --no-cache -t $REPO_URL:latest .
-          docker push $REPO_URL:latest
+      # 3. Installation de Terraform (DÉPLACÉ ICI)
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
 
+      # 4. Configuration AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -40,20 +41,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Test AWS Identity
-        run: aws sts get-caller-identity
-
-      - name: Test AWS Connection
-        run: |
-          echo "✅ Connected to AWS successfully!"
-          echo "Account ID: $(aws sts get-caller-identity --query Account --output text)"
-          echo "User ARN: $(aws sts get-caller-identity --query Arn --output text)"
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.5.0
-
+      # 5. Préparation Backend et Init Terraform
       - name: Create S3 Backend Bucket
         run: |
           aws s3api create-bucket \
@@ -62,43 +50,29 @@ jobs:
             --create-bucket-configuration LocationConstraint=eu-west-3 \
             2>/dev/null || echo "Bucket already exists"
 
-          aws s3api put-bucket-versioning \
-            --bucket terraform-state-g2-mg03 \
-            --versioning-configuration Status=Enabled
-
-          aws s3api put-bucket-encryption \
-            --bucket terraform-state-g2-mg03 \
-            --server-side-encryption-configuration '{"Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]}'
-
       - name: Terraform Init
         working-directory: ./terraform
         run: terraform init
 
-      - name: Terraform Validate
-        working-directory: ./terraform
-        run: terraform validate
-
-      # --- ÉTAPE A : Créer SEULEMENT le repository ECR ---
+      # 6. Création de l'ECR (pour avoir l'URL de l'image)
       - name: Terraform Apply ECR Only
         working-directory: ./terraform
         run: terraform apply -target=module.ecr_G2MG03 -auto-approve
 
-      # --- ÉTAPE B : Login, Build et Push de l'image Docker ---
+      # 7. Login ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
+      # 8. Build et Push avec les données LFS
       - name: Build, tag, and push image to Amazon ECR
-        working-directory: .  # Assurez-vous que c'est là où se trouve votre Dockerfile
         run: |
-          # Récupérer l'URL proprement depuis Terraform
+          # Maintenant terraform est bien installé et peut donner l'output
           REPO_URL=$(terraform -chdir=./terraform output -raw ecr_repository_url)
-          
-          # Build & Push
-          docker build -t $REPO_URL:latest .
+          docker build --no-cache -t $REPO_URL:latest .
           docker push $REPO_URL:latest
 
-      # --- ÉTAPE C : Créer le reste (App Runner + ECS) ---
+      # 9. Déploiement final (App Runner utilise l'image qu'on vient de pousser)
       - name: Terraform Apply Full
         working-directory: ./terraform
         run: terraform apply -auto-approve
@@ -106,7 +80,4 @@ jobs:
       - name: Terraform Output
         working-directory: ./terraform
         run: |
-          echo "========================================="
-          echo "Infrastructure & App Deployed Successfully!"
-          echo "========================================="
           echo "App Runner URL: $(terraform output -raw app_runner_url 2>/dev/null || echo 'Check AWS Console')"
