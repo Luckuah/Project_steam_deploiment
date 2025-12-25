@@ -19,12 +19,10 @@ ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y git-lfs
+
 # Copy project files into image
 COPY . /app
-
-RUN git config --global --add safe.directory /app && \
-    git lfs install && \
-    git lfs pull
 
 # Ensure src/.env exists with container-friendly defaults (only if missing)
 RUN mkdir -p src \
