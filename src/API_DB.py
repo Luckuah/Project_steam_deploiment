@@ -34,7 +34,11 @@ def normalize_path(path: str) -> str:
 
 from NLGCL.recomendation_NLGCL import setup_recbole_model,recommend_topk
 from GenSar.recommender_service import recommender
-recommender.load()
+
+try:
+    recommender.load()
+except Exception as e:
+    print(f"Le Recommender n'a pas pu démarrer (données non prêtes) : {e}")
 rich_pretty.install()
 rich_traceback_install(show_locals=False)
 dictConfig({
