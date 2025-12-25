@@ -16,6 +16,7 @@ import urllib.request
 from urllib.error import HTTPError, URLError
 import zipfile
 import shutil
+import io
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -287,198 +288,79 @@ def import_games(db, build_indexes: bool = False):
 
 
 # ---------------------------------------------------------------------------
-# Reviews import
+# Reviews import (Version optimisée pour App Runner)
 # ---------------------------------------------------------------------------
 
 def import_reviews(db, build_indexes: bool = False, workers: int = 1):
     col = db[REVIEWS_COLLECTION]
-    logger.info("[reviews] Target collection: %s", REVIEWS_COLLECTION)
+    tmp_zip_path = DATA_DIR / "reviews_download.zip"
 
-    reviews_dir = REVIEWS_DIR
-    logger.debug("[reviews] Looking for CSVs in: %s", reviews_dir)
-
-    if not reviews_dir.exists():
-        logger.error("[reviews] Directory not found: %s", reviews_dir)
+    if not tmp_zip_path.exists():
+        logger.error("[reviews] Fichier ZIP introuvable : %s", tmp_zip_path)
         return
 
-    files = sorted(reviews_dir.glob("*.csv"))
-    logger.info("[reviews] Found %d CSV file(s)", len(files))
+    logger.info("[reviews] Début de l'importation en STREAMING depuis le ZIP (économie de disque)...")
 
-    if not files:
-        logger.warning("[reviews] No CSV files found.")
-        return
+    with zipfile.ZipFile(tmp_zip_path, "r") as zf:
+        csv_infos = [info for info in zf.infolist() if info.filename.lower().endswith(".csv") and not info.is_dir()]
+        logger.info("[reviews] %d fichiers trouvés dans le ZIP", len(csv_infos))
 
-    prev_count = col.estimated_document_count()
-    logger.debug("[reviews] Existing document count before import: %d", prev_count)
-
-    def process_file(csv_path: Path) -> int:
-        """Import a single CSV file into the reviews collection. Returns inserted count."""
-        stem = csv_path.stem  # "<app_id>_<review_Count>"
-        try:
-            app_id = int(stem.split("_", 1)[0])
-        except Exception:
-            logger.warning("[reviews] Skip (cannot parse app_id) from file name: %s", csv_path.name)
-            return 0
-
-        logger.info("[reviews] Importing %s (app_id=%d)...", csv_path.name, app_id)
-        batch: List[InsertOne] = []
-        inserted_for_file = 0
-        line_count = 0
-
-        with csv_path.open("r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f)
-            logger.debug("[reviews] CSV header fields for %s: %s", csv_path.name, reader.fieldnames)
-            for row in reader:
-                line_count += 1
-
-                # user: str
-                user = (row.get("user") or "").strip() or None
-
-                # playtime: float
-                playtime = None
-                raw_playtime = row.get("playtime")
-                if raw_playtime not in (None, ""):
-                    try:
-                        playtime = float(raw_playtime)
-                    except ValueError:
-                        logger.debug(
-                            "[reviews] Invalid playtime %r in file %s line %d",
-                            raw_playtime,
-                            csv_path.name,
-                            line_count + 1,
-                        )
-                        playtime = None
-
-                # post_date: parse "October 22, 2024"
-                post_date = parse_date_mdy_long(row.get("post_date"))
-
-                # helpfulness: int
-                helpfulness = None
-                raw_help = row.get("helpfulness")
-                if raw_help not in (None, ""):
-                    try:
-                        helpfulness = int(raw_help)
-                    except ValueError:
-                        logger.debug(
-                            "[reviews] Invalid helpfulness %r in file %s line %d",
-                            raw_help,
-                            csv_path.name,
-                            line_count + 1,
-                        )
-                        helpfulness = None
-
-                # review: str
-                review_text = (row.get("review") or "").strip() or None
-
-                # recommend: "Recommended"/"Not Recommended" -> bool
-                recommend = coerce_bool_recommend(row.get("recommend"))
-
-                # early_access_review: Null or "Early Access Review" -> bool
-                early_access = coerce_bool_early_access(row.get("early_access_review"))
-
-                doc = {
-                    "app_id": app_id,
-                    "user": user,
-                    "playtime": playtime,
-                    "post_date": post_date,
-                    "helpfulness": helpfulness,
-                    "review_text": review_text,
-                    "recommend": recommend,
-                    "early_access": early_access,
-                    "source_file": csv_path.name,
-                }
-                # strip None values for cleanliness
-                doc = {k: v for k, v in doc.items() if v is not None}
-
-                if line_count <= 3:
-                    logger.debug(
-                        "[reviews] Sample doc from %s line %d: keys=%s",
-                        csv_path.name,
-                        line_count,
-                        list(doc.keys()),
-                    )
-
-                batch.append(InsertOne(doc))
-                if len(batch) >= BATCH_SIZE:
-                    logger.debug("[reviews] Writing batch of %d docs for file %s", len(batch), csv_path.name)
-                    try:
-                        res = col.bulk_write(batch, ordered=False)
-                        inserted_now = getattr(res, "inserted_count", 0) or 0
-                        inserted_for_file += inserted_now
-                        logger.debug(
-                            "[reviews] Batch write for %s: inserted=%d (running total for file=%d)",
-                            csv_path.name,
-                            inserted_now,
-                            inserted_for_file,
-                        )
-                    except BulkWriteError as bwe:
-                        logger.error("[reviews] Bulk write error for %s: %s", csv_path.name, bwe.details)
-                    batch = []
-
-        if batch:
-            logger.debug("[reviews] Writing final batch of %d docs for file %s", len(batch), csv_path.name)
+        total_inserted = 0
+        for info in csv_infos:
+            filename = Path(info.filename).name
             try:
-                res = col.bulk_write(batch, ordered=False)
-                inserted_now = getattr(res, "inserted_count", 0) or 0
-                inserted_for_file += inserted_now
-                logger.debug(
-                    "[reviews] Final batch write for %s: inserted=%d (total for file=%d)",
-                    csv_path.name,
-                    inserted_now,
-                    inserted_for_file,
-                )
-            except BulkWriteError as bwe:
-                logger.error("[reviews] Bulk write error (final batch) for %s: %s", csv_path.name, bwe.details)
+                app_id = int(filename.split("_", 1)[0])
+            except Exception:
+                continue
 
-        logger.info(
-            "[reviews] %s: inserted ≈%d docs (rows read=%d)",
-            csv_path.name,
-            inserted_for_file,
-            line_count,
-        )
-        return inserted_for_file
+            logger.info("[reviews] Importation : %s (app_id=%d)", filename, app_id)
+            
+            with zf.open(info, "r") as f:
+                reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8"))
+                batch = []
+                
+                for row in reader:
+                    # Conversion sécurisée du playtime
+                    playtime = None
+                    try:
+                        raw_playtime = row.get("playtime")
+                        if raw_playtime:
+                            playtime = float(raw_playtime)
+                    except ValueError:
+                        pass
 
-    total_inserted = 0
+                    doc = {
+                        "app_id": app_id,
+                        "user": (row.get("user") or "").strip() or None,
+                        "playtime": playtime,
+                        "post_date": parse_date_mdy_long(row.get("post_date")),
+                        "recommend": coerce_bool_recommend(row.get("recommend")),
+                        "early_access": coerce_bool_early_access(row.get("early_access_review")),
+                    }
+                    doc = {k: v for k, v in doc.items() if v is not None}
+                    batch.append(InsertOne(doc))
 
-    if workers <= 1 or len(files) == 1:
-        logger.info("[reviews] Running single-threaded import (workers=%d, files=%d)", workers, len(files))
-        for f in files:
-            total_inserted += process_file(f)
-    else:
-        logger.info(
-            "[reviews] Running multi-threaded import with %d workers over %d files",
-            workers,
-            len(files),
-        )
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            future_to_file = {executor.submit(process_file, f): f for f in files}
-            for future in as_completed(future_to_file):
-                f = future_to_file[future]
-                try:
-                    inserted = future.result()
-                    total_inserted += inserted
-                except Exception as e:
-                    logger.exception("[reviews] Unhandled exception while processing %s: %s", f.name, e)
-    col.create_index([("user", ASCENDING), ("app_id", ASCENDING)])
+                    # Batch de 10 000 est un bon équilibre RAM/Vitesse
+                    if len(batch) >= 10000:
+                        res = col.bulk_write(batch, ordered=False)
+                        total_inserted += res.inserted_count
+                        batch = []
+
+                if batch:
+                    res = col.bulk_write(batch, ordered=False)
+                    total_inserted += res.inserted_count
+
+    # LIBÉRATION DE L'ESPACE DISQUE IMMÉDIATE
+    logger.info("[reviews] Importation terminée. Suppression du ZIP (4.2 Go libérés).")
+    try:
+        tmp_zip_path.unlink()
+    except Exception as e:
+        logger.warning("[reviews] Impossible de supprimer le ZIP : %s", e)
+    
     if build_indexes:
-        logger.info("[reviews] Creating indexes (may take time)...")
+        logger.info("[reviews] Création des index (cette étape peut être longue)...")
         col.create_index([("app_id", ASCENDING), ("post_date", DESCENDING)])
-        logger.debug("[reviews] Created index on (app_id, post_date DESC)")
-        col.create_index([("app_id", ASCENDING), ("recommend", ASCENDING)])
-        logger.debug("[reviews] Created index on (app_id, recommend)")
-        col.create_index([("review_text", "text")])
-        logger.debug("[reviews] Created text index on 'review_text'")
-        logger.info("[reviews] Indexes ready.")
-    else:
-        logger.info("[reviews] Index creation skipped (use --build-indexes to enable).")
-
-    new_count = col.estimated_document_count()
-    logger.info(
-        "[reviews] Import complete. Total inserted ≈%d, new doc count=%d (delta=%d)",
-        total_inserted,
-        new_count,
-        new_count - prev_count,
-    )
+        col.create_index([("user", ASCENDING)])
 
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
@@ -710,39 +592,24 @@ def ensure_games_json_present() -> None:
     logger.info("[data] Attempting to download games JSON from Mendeley...")
     _download_file(GAMES_JSON_URL, GAMES_JSON_PATH)
     logger.info("[data] games.json is now available at %s", GAMES_JSON_PATH)
+
 def ensure_reviews_present() -> None:
     """
-    Ensure review CSVs are present in REVIEWS_DIR.
-    If no CSVs are found, download the ZIP and extract them flat into REVIEWS_DIR.
+    S'assure que le ZIP des reviews est présent.
+    Sur App Runner, on ne décompresse PAS le ZIP sur le disque pour éviter le 'No space left on device'.
     """
-    if REVIEWS_DIR.exists():
-        csv_files = list(REVIEWS_DIR.glob("*.csv"))
-        if csv_files:
-            logger.info(
-                "[data] Found %d review CSV file(s) in %s",
-                len(csv_files),
-                REVIEWS_DIR,
-            )
-            return
-        else:
-            logger.warning("[data] 'Game Reviews' directory exists but contains no CSV files.")
-    else:
-        logger.warning("[data] Reviews directory not found: %s", REVIEWS_DIR)
-
-    # Need to download + extract
-    logger.info("[data] Attempting to download review ZIP from Mendeley...")
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     tmp_zip_path = DATA_DIR / "reviews_download.zip"
+    
+    # Si le ZIP existe déjà, on ne fait rien
+    if tmp_zip_path.exists():
+        logger.info("[data] ZIP de reviews déjà présent à %s", tmp_zip_path)
+        return
 
+    # Sinon, on télécharge le ZIP
+    logger.info("[data] Téléchargement du ZIP des reviews depuis Mendeley...")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     _download_file(REVIEWS_ZIP_URL, tmp_zip_path)
-    _extract_reviews_zip_flat(tmp_zip_path, REVIEWS_DIR)
 
-    # Optional: clean up ZIP after successful extraction
-    try:
-        tmp_zip_path.unlink()
-        logger.debug("[data] Removed temporary ZIP file %s", tmp_zip_path)
-    except FileNotFoundError:
-        pass
 def ensure_data_files_present() -> None:
     """
     Ensure both games.json and review CSVs exist.
