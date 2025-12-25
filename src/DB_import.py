@@ -624,101 +624,61 @@ def ensure_data_files_present() -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Import games, reviews and build users into MongoDB (with Rich logging)."
-    )
-    parser.add_argument(
-        "--build-indexes",
-        action="store_true",
-        help="Create indexes on collections (can be slow on large datasets).",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="DEBUG",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Logging level (default: DEBUG).",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Number of worker threads for reviews import (default: 1).",
-    )
+    # --- CONFIGURATION & LOGS ---
+    parser = argparse.ArgumentParser(description="Import Steam Data")
+    parser.add_argument("--build-indexes", action="store_true")
+    parser.add_argument("--log-level", default="INFO") # Passer en INFO pour éviter de saturer les logs CloudWatch
+    parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
-    logger.info("[main] Parsed arguments: %r", args)
-
     setup_logging(args.log_level)
 
     logger.info("[main] Starting import script")
-    logger.debug("[main] Arguments: build_indexes=%s, log_level=%s", args.build_indexes, args.log_level)
 
+    # --- SÉCURITÉ ANTI-CORRUPTION (IMPORTANT pour App Runner) ---
+    # Si games.json fait 0 octet, on le supprime pour forcer le retéléchargement
+    if GAMES_JSON_PATH.exists() and GAMES_JSON_PATH.stat().st_size == 0:
+        logger.warning("[main] games.json est vide, suppression pour retéléchargement...")
+        GAMES_JSON_PATH.unlink()
+
+    # --- TÉLÉCHARGEMENT ---
     ensure_data_files_present()
+    
     env = load_env(ENV_PATH)
     db = get_db_from_env(env)
 
-    logger.debug("[main] Available collections before import: %s", db.list_collection_names())
-
     # ----------------------------------------------------------------------
-    # Games collection
+    # 1. GAMES (On ajoute un try/except pour le JSON corrompu)
     # ----------------------------------------------------------------------
     existing = set(db.list_collection_names())
-    if GAMES_COLLECTION in existing:
-        logger.info("[games] Collection '%s' already exists.", GAMES_COLLECTION)
-        if ask_yes_no(f"[games] Collection '{GAMES_COLLECTION}' already exists. Drop and re-import?", default=False):
-            logger.info("[games] Dropping collection '%s'...", GAMES_COLLECTION)
-            db.drop_collection(GAMES_COLLECTION)
+    try:
+        if GAMES_COLLECTION not in existing:
+            logger.info("[games] Importing games...")
             import_games(db, build_indexes=args.build_indexes)
         else:
-            logger.info("[games] Skipping import; collection '%s' left unchanged.", GAMES_COLLECTION)
+            logger.info("[games] Collection exists, skipping.")
+    except json.JSONDecodeError:
+        logger.error("[critical] games.json est corrompu. Supprimez le fichier et relancez.")
+        GAMES_JSON_PATH.unlink(missing_ok=True)
+        return
+
+    # ----------------------------------------------------------------------
+    # 2. REVIEWS (C'est ici que ton streaming sauve le disque)
+    # ----------------------------------------------------------------------
+    if REVIEWS_COLLECTION not in set(db.list_collection_names()):
+        import_reviews(db, build_indexes=args.build_indexes)
     else:
-        logger.info("[games] Collection '%s' does not exist; importing...", GAMES_COLLECTION)
-        import_games(db, build_indexes=args.build_indexes)
+        logger.info("[reviews] Collection exists, skipping.")
 
     # ----------------------------------------------------------------------
-    # Reviews collection
+    # 3. USERS
     # ----------------------------------------------------------------------
-    existing = set(db.list_collection_names())
-    if REVIEWS_COLLECTION in existing:
-        logger.info("[reviews] Collection '%s' already exists.", REVIEWS_COLLECTION)
-        if ask_yes_no(f"[reviews] Collection '{REVIEWS_COLLECTION}' already exists. Drop and re-import?", default=False):
-            logger.info("[reviews] Dropping collection '%s'...", REVIEWS_COLLECTION)
-            db.drop_collection(REVIEWS_COLLECTION)
-            import_reviews(db, build_indexes=args.build_indexes,workers=args.workers)
-        else:
-            logger.info("[reviews] Skipping import; collection '%s' left unchanged.", REVIEWS_COLLECTION)
-    else:
-        logger.info("[reviews] Collection '%s' does not exist; importing...", REVIEWS_COLLECTION)
-        import_reviews(db, build_indexes=args.build_indexes,workers=args.workers)
+    if USERS_COLLECTION not in set(db.list_collection_names()):
+        build_users_from_reviews(db, build_indexes=args.build_indexes)
 
-    # ----------------------------------------------------------------------
-    # Users collection (built from reviews)
-    # ----------------------------------------------------------------------
-    existing = set(db.list_collection_names())
-    reviews_exists = REVIEWS_COLLECTION in existing
-
-    if not reviews_exists:
-        logger.error("[users] Cannot build 'users': '%s' collection does not exist.", REVIEWS_COLLECTION)
-    else:
-        if USERS_COLLECTION in existing:
-            logger.info("[users] Collection '%s' already exists.", USERS_COLLECTION)
-            if ask_yes_no(
-                f"[users] Collection '{USERS_COLLECTION}' already exists. Drop and rebuild from '{REVIEWS_COLLECTION}'?",
-                default=False,
-            ):
-                logger.info("[users] Dropping collection '%s'...", USERS_COLLECTION)
-                db.drop_collection(USERS_COLLECTION)
-                build_users_from_reviews(db, build_indexes=args.build_indexes)
-            else:
-                logger.info("[users] Skipping rebuild; collection '%s' left unchanged.", USERS_COLLECTION)
-        else:
-            logger.info("[users] Collection '%s' does not exist; building from '%s'...", USERS_COLLECTION, REVIEWS_COLLECTION)
-            build_users_from_reviews(db, build_indexes=args.build_indexes)
-
-    logger.debug("[main] Final collections: %s", db.list_collection_names())
-    logger.info("[main] All done.")
-
+    logger.info("[main] All done. Nettoyage final...")
+    # Optionnel: supprimer games.json à la fin pour libérer encore plus de place
+    # GAMES_JSON_PATH.unlink(missing_ok=True)
 
 if __name__ == "__main__":
     main()
