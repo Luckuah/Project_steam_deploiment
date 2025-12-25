@@ -116,6 +116,7 @@ resource "aws_apprunner_service" "service" {
         # --- VARIABLES POUR MONGO ---
         runtime_environment_variables = {
           "DB_IP"   = "mongo.steam.internal" # Nom DNS créé par le module ECS
+          "S3_BUCKET" = "terraform-state-g2-mg03"
           "DB_PORT" = "27017"
           "DB_USER" = "User"
           "DB_PASSWORD" = "Pass"

@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 import zipfile
 import shutil
 import io
+import os
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -24,6 +25,43 @@ import io
 
 LOGGER_NAME = "steam_import"
 logger = logging.getLogger(LOGGER_NAME)
+
+import boto3
+import requests
+
+GAMES_JSON_URL = (
+    "https://data.mendeley.com/public-files/datasets/jxy85cr3th/files/"
+    "9fa9989d-d4f4-426a-aad3-fa9a96700332/file_downloaded"
+)
+REVIEWS_ZIP_URL = (
+    "https://data.mendeley.com/public-files/datasets/jxy85cr3th/files/"
+    "273898e9-90f1-49ff-8d62-df52e67341b3/file_downloaded"
+)
+
+S3_BUCKET = os.getenv("S3_BUCKET")
+S3_GAMES_KEY = "data/games.json"
+S3_REVIEWS_KEY = "data/reviews_download.zip"
+
+def download_and_upload_to_s3(url, bucket_name, s3_key):
+    """Télécharge le fichier de Mendeley et l'envoie sur S3 sans stockage local."""
+    s3 = boto3.client('s3')
+    logger.info(f"Démarrage du streaming vers S3: s3://{bucket_name}/{s3_key}")
+    
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        # upload_fileobj accepte un flux binaire (r.raw)
+        s3.upload_fileobj(r.raw, bucket_name, s3_key)
+    logger.info("Transfert S3 terminé.")
+
+def ensure_reviews_zip_on_s3(bucket_name, s3_key, download_url):
+    """Vérifie si le fichier est sur S3, sinon le télécharge."""
+    s3 = boto3.client('s3')
+    try:
+        s3.head_object(Bucket=bucket_name, Key=s3_key)
+        logger.info("Le fichier ZIP est déjà présent sur S3.")
+    except:
+        logger.info("Fichier ZIP absent de S3. Téléchargement initial en cours...")
+        download_and_upload_to_s3(download_url, bucket_name, s3_key)
 
 def setup_logging(level_name: str = "DEBUG") -> None:
     """
@@ -295,17 +333,24 @@ def import_games(db, build_indexes: bool = False):
 # Reviews import (Version optimisée pour App Runner)
 # ---------------------------------------------------------------------------
 
-def import_reviews(db, build_indexes: bool = False, workers: int = 1):
+def import_reviews(db, build_indexes: bool = False):
     col = db[REVIEWS_COLLECTION]
-    tmp_zip_path = DATA_DIR / "reviews_download.zip"
+    
+    if S3_BUCKET:
+        logger.info("[reviews] Lecture du ZIP en streaming depuis S3...")
+        s3 = boto3.client('s3')
+        # On récupère l'objet S3 dans un buffer mémoire (BytesIO)
+        # Attention : si le ZIP fait 4Go, on utilise le streaming de boto3
+        response = s3.get_object(Bucket=S3_BUCKET, Key=S3_REVIEWS_KEY)
+        zip_stream = io.BytesIO(response['Body'].read()) 
+        zf_context = zipfile.ZipFile(zip_stream)
+    else:
+        # Mode local classique (fallback)
+        tmp_zip_path = DATA_DIR / "reviews_download.zip"
+        if not tmp_zip_path.exists(): return
+        zf_context = zipfile.ZipFile(tmp_zip_path, "r")
 
-    if not tmp_zip_path.exists():
-        logger.error("[reviews] Fichier ZIP introuvable : %s", tmp_zip_path)
-        return
-
-    logger.info("[reviews] Début de l'importation en STREAMING depuis le ZIP (économie de disque)...")
-
-    with zipfile.ZipFile(tmp_zip_path, "r") as zf:
+    with zf_context as zf:
         csv_infos = [info for info in zf.infolist() if info.filename.lower().endswith(".csv") and not info.is_dir()]
         logger.info("[reviews] %d fichiers trouvés dans le ZIP", len(csv_infos))
 
@@ -488,14 +533,6 @@ def ask_yes_no(question: str, default: bool = False) -> bool:
 # Dataset Downloader
 # ----------------------------------------------------------------------------
 
-GAMES_JSON_URL = (
-    "https://data.mendeley.com/public-files/datasets/jxy85cr3th/files/"
-    "9fa9989d-d4f4-426a-aad3-fa9a96700332/file_downloaded"
-)
-REVIEWS_ZIP_URL = (
-    "https://data.mendeley.com/public-files/datasets/jxy85cr3th/files/"
-    "273898e9-90f1-49ff-8d62-df52e67341b3/file_downloaded"
-)
 
 def _download_file(url: str, dest_path: Path) -> None:
     """
@@ -615,14 +652,20 @@ def ensure_reviews_present() -> None:
     _download_file(REVIEWS_ZIP_URL, tmp_zip_path)
 
 def ensure_data_files_present() -> None:
-    """
-    Ensure both games.json and review CSVs exist.
-    Download / extract them if missing.
-    """
-    logger.info("[data] Checking presence of required data files...")
-    ensure_games_json_present()
-    ensure_reviews_present()
-    logger.info("[data] Data files check complete.")
+    """Flux 100% S3 : Télécharge de Mendeley vers S3 si nécessaire."""
+    if not S3_BUCKET:
+        logger.warning("[s3] S3_BUCKET non défini. Passage en mode local classique.")
+        ensure_games_json_present()
+        ensure_reviews_present()
+        return
+
+    logger.info(f"[s3] Vérification des fichiers sur le bucket : {S3_BUCKET}")
+    
+    # 1. Gérer GAMES JSON
+    ensure_reviews_zip_on_s3(S3_BUCKET, S3_GAMES_KEY, GAMES_JSON_URL)
+    
+    # 2. Gérer REVIEWS ZIP
+    ensure_reviews_zip_on_s3(S3_BUCKET, S3_REVIEWS_KEY, REVIEWS_ZIP_URL)
 
 
 # ---------------------------------------------------------------------------
