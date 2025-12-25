@@ -14,6 +14,14 @@ jobs:
         with:
           lfs: true
           fetch-depth: 0
+      # ÉTAPE DE NETTOYAGE :
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo docker image prune -a -f
 
       # 2. Forcer le téléchargement des données réelles
       - name: Force LFS Pull and Verify
