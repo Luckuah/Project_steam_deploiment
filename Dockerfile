@@ -22,6 +22,8 @@ WORKDIR /app
 # Copy project files into image
 COPY . /app
 
+RUN git lfs install && git lfs pull
+
 # Ensure src/.env exists with container-friendly defaults (only if missing)
 RUN mkdir -p src \
  && if [ ! -f src/.env ]; then \
