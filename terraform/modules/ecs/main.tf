@@ -67,8 +67,12 @@ resource "aws_ecs_task_definition" "mongo_task" {
   family                   = "${var.cluster_name}-mongo-task"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"
-  memory                   = "1024"
+  cpu                      = "1024"
+  memory                   = "2048"
+
+  ephemeral_storage {
+    size_in_gib = 50
+  }
 
   container_definitions = jsonencode([
     {
