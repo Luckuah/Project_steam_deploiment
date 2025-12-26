@@ -379,7 +379,7 @@ def import_reviews(db, build_indexes=True):
                         "language": row.get("language"),
                         "review": row.get("review"),
                         "timestamp_created": int(row.get("timestamp_created", 0)),
-                        "author_id": row.get("author_steamid"),
+                        "user": row.get("author_steamid"),
                         "recommended": row.get("recommended") == "True",
                         "votes_up": int(row.get("votes_up", 0))
                     }
@@ -625,7 +625,7 @@ def _extract_reviews_zip_flat(zip_path: Path, dest_dir: Path) -> None:
 
     if extracted_count == 0:
         logger.warning("[data] No CSV files were found in %s", zip_path)
-        
+
 def ensure_games_json_present() -> None:
     """
     Ensure games.json is present in DATA_DIR.
