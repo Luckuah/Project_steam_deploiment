@@ -342,86 +342,74 @@ def import_games_from_s3(db, build_indexes: bool = False):
 
 def import_reviews(db, build_indexes=True):
     """
-    Importe les reviews depuis un ZIP stocké sur S3 vers MongoDB.
-    Utilise /tmp pour éviter les MemoryError.
+    Importe les reviews en streaming direct depuis S3 vers MongoDB.
+    Évite de saturer le disque /tmp.
     """
     import io
-    from pymongo import InsertOne
+    from pymongo import UpdateOne
     
     s3 = boto3.client('s3')
-    local_zip = "/tmp/reviews_download.zip"
     collection = db[REVIEWS_COLLECTION]
-
-    # 1. TÉLÉCHARGEMENT DU ZIP (Vers le disque, pas la RAM)
-    if not os.path.exists(local_zip):
-        logger.info("📥 Téléchargement du ZIP depuis S3 vers /tmp...")
-        try:
-            s3.download_file(S3_BUCKET, S3_REVIEWS_KEY, local_zip)
-            logger.info("✅ Téléchargement terminé.")
-        except Exception as e:
-            logger.error(f"❌ Erreur lors du téléchargement S3: {e}")
-            return
-
-    # 2. LECTURE ET INSERTION PAR LOTS (BULK)
-    logger.info("📖 Lecture du ZIP et insertion dans MongoDB...")
+    
+    logger.info(f"[reviews] Streaming depuis S3 : s3://{S3_BUCKET}/{S3_REVIEWS_KEY}")
+    
     try:
-        with zipfile.ZipFile(local_zip, 'r') as z:
-            # On identifie le fichier CSV à l'intérieur
+        # On récupère l'objet directement dans un flux
+        response = s3.get_object(Bucket=S3_BUCKET, Key=S3_REVIEWS_KEY)
+        
+        with zipfile.ZipFile(io.BytesIO(response['Body'].read())) as z:
             csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
             
             with z.open(csv_filename) as f:
-                # TextIOWrapper permet de lire le flux binaire en texte ligne par ligne
                 reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                 
                 batch = []
-                batch_size = 5000  # Taille idéale pour l'équilibre vitesse/mémoire
+                batch_size = 5000 
                 total_inserted = 0
 
                 for row in reader:
-                    # Préparation du document
+                    # IMPORTANT : On vérifie que les champs critiques existent
+                    review_id = row.get("review_id")
+                    user_id = row.get("author_steamid")
+                    
+                    if not review_id or not user_id:
+                        continue
+
                     doc = {
-                        "app_id": row.get("app_id"),
+                        "app_id": int(row["app_id"]) if row.get("app_id") else None,
                         "app_name": row.get("app_name"),
-                        "review_id": row.get("review_id"),
+                        "review_id": review_id,
                         "language": row.get("language"),
                         "review": row.get("review"),
                         "timestamp_created": int(row.get("timestamp_created", 0)),
-                        "user": row.get("author_steamid"),
+                        "user": user_id, # C'est ce champ qui lie à la collection 'users'
                         "recommended": row.get("recommended") == "True",
                         "votes_up": int(row.get("votes_up", 0))
                     }
                     
-                    batch.append(InsertOne(doc))
+                    # On utilise UpdateOne avec upsert=True pour éviter les erreurs si on relance
+                    batch.append(UpdateOne({"review_id": review_id}, {"$set": doc}, upsert=True))
 
-                    # Si le lot est plein, on écrit dans la base
                     if len(batch) >= batch_size:
                         collection.bulk_write(batch, ordered=False)
                         total_inserted += len(batch)
-                        logger.info(f"💾 {total_inserted} reviews insérées...")
+                        logger.info(f"💾 {total_inserted} reviews traitées...")
                         batch = []
 
-                # Insertion du dernier lot restant
                 if batch:
                     collection.bulk_write(batch, ordered=False)
                     total_inserted += len(batch)
 
-                logger.info(f"✅ Importation terminée : {total_inserted} documents au total.")
+                logger.info(f"✅ Streaming terminé : {total_inserted} reviews en base.")
 
     except Exception as e:
-        logger.error(f"❌ Erreur pendant l'importation: {e}")
+        logger.error(f"❌ Erreur pendant le streaming des reviews: {e}")
     
-    # 3. CRÉATION DES INDEX (Après l'import pour la performance)
     if build_indexes:
-        logger.info("⚡ Création des index pour les reviews...")
+        logger.info("⚡ Création des index...")
         collection.create_index([("app_id", 1)])
-        collection.create_index([("author_id", 1)])
+        collection.create_index([("user", 1)])
         collection.create_index([("review_id", 1)], unique=True)
-        logger.info("✅ Index créés.")
-
-    # Nettoyage optionnel du ZIP pour libérer de l'espace sur /tmp
-    if os.path.exists(local_zip):
-        os.remove(local_zip)
-        logger.info("🧹 Fichier temporaire supprimé.")
 
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
