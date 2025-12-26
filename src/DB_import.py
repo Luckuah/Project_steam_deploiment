@@ -28,6 +28,7 @@ logger = logging.getLogger(LOGGER_NAME)
 
 import boto3
 import requests
+import ijson
 
 GAMES_JSON_URL = (
     "https://data.mendeley.com/public-files/datasets/jxy85cr3th/files/"
@@ -276,57 +277,56 @@ def load_games_array(games_json_path: Path) -> List[dict]:
     logger.info("[games] Loaded %d game documents from JSON", len(data))
     return data
 
-def import_games(db, build_indexes: bool = False):
-    if GAMES_JSON_PATH.exists() and GAMES_JSON_PATH.stat().st_size == 0:
-        logger.warning("[games] games.json est vide, suppression...")
-        GAMES_JSON_PATH.unlink()
-        ensure_games_json_present()
+def import_games_from_s3(db, build_indexes: bool = False):
+    """Importe les jeux en streaming direct depuis S3 vers MongoDB."""
+    s3 = boto3.client('s3')
     col = db[GAMES_COLLECTION]
-    logger.info("[games] Target collection: %s", GAMES_COLLECTION)
+    
+    logger.info(f"[games] Streaming de games.json depuis S3 (s3://{S3_BUCKET}/{S3_GAMES_KEY})...")
+    
+    try:
+        response = s3.get_object(Bucket=S3_BUCKET, Key=S3_GAMES_KEY)
+        # response['Body'] est un flux binaire que ijson peut lire petit à petit
+        # On utilise kvitems car votre JSON est un dictionnaire { "id": {data} }
+        parser = ijson.kvitems(response['Body'], '')
+        
+        batch = []
+        batch_size = 1000
+        total_inserted = 0
+        
+        for k, v in parser:
+            # Reconstitution du document avec son ID
+            doc = {**v, "_id": int(k) if str(k).isdigit() else k}
+            
+            # Parsing de la date (réutilisation de votre helper)
+            rd = doc.get("release_date")
+            if isinstance(rd, str):
+                parsed_dt = parse_date_mdy_long(rd)
+                if parsed_dt:
+                    doc["release_date"] = parsed_dt
+            
+            # On utilise UpdateOne avec upsert pour éviter les doublons
+            batch.append(UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True))
+            
+            if len(batch) >= batch_size:
+                col.bulk_write(batch, ordered=False)
+                total_inserted += len(batch)
+                logger.info(f"🎮 {total_inserted} jeux traités...")
+                batch = []
+        
+        if batch:
+            col.bulk_write(batch, ordered=False)
+            total_inserted += len(batch)
 
-    if not GAMES_JSON_PATH.exists():
-        logger.error("[games] JSON file not found: %s", GAMES_JSON_PATH)
-        return
+        logger.info(f"✅ Importation des jeux terminée : {total_inserted} documents.")
 
-    prev_count = col.estimated_document_count()
-    logger.debug("[games] Existing document count before import: %d", prev_count)
+        if build_indexes:
+            logger.info("[games] Création des index...")
+            col.create_index([("name", "text")])
+            col.create_index([("price", 1)])
 
-    games = load_games_array(GAMES_JSON_PATH)
-    if not games:
-        logger.warning("[games] No documents found in JSON.")
-        return
-
-    ops: List[UpdateOne | InsertOne] = []
-    for g in games:
-        if "_id" in g:
-            ops.append(UpdateOne({"_id": g["_id"]}, {"$set": g}, upsert=True))
-        else:
-            ops.append(InsertOne(g))
-
-    logger.info("[games] Bulk writing %d operations...", len(ops))
-    res = col.bulk_write(ops, ordered=False)
-    upserted = getattr(res, "upserted_count", 0) or 0
-    modified = getattr(res, "modified_count", 0) or 0
-    inserted = getattr(res, "inserted_count", 0) or 0
-    logger.info(
-        "[games] Bulk write done: upserted=%d, modified=%d, inserted=%d",
-        upserted,
-        modified,
-        inserted,
-    )
-
-    new_count = col.estimated_document_count()
-    logger.debug("[games] Document count after import: %d (delta=%d)", new_count, new_count - prev_count)
-
-    if build_indexes:
-        logger.info("[games] Creating indexes (may take time)...")
-        col.create_index([("name", "text")])
-        logger.debug("[games] Created text index on 'name'")
-        col.create_index([("price", ASCENDING)])
-        logger.debug("[games] Created index on 'price'")
-        logger.info("[games] Indexes ready.")
-    else:
-        logger.info("[games] Index creation skipped (use --build-indexes to enable).")
+    except Exception as e:
+        logger.error(f"❌ Erreur pendant le streaming S3 des jeux: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -658,18 +658,16 @@ def ensure_reviews_present() -> None:
     _download_file(REVIEWS_ZIP_URL, tmp_zip_path)
 
 def ensure_data_files_present() -> None:
-    """S'assure que games.json est en local et que le ZIP est sur S3."""
-    # 1. Toujours s'assurer que games.json est présent en LOCAL (/tmp/data)
-    # car import_games() en a besoin physiquement.
-    ensure_games_json_present() 
-
+    """S'assure que les jeux ET les reviews sont sur S3."""
     if not S3_BUCKET:
-        logger.warning("[s3] S3_BUCKET non défini. On télécharge aussi le ZIP en local.")
+        logger.warning("[s3] S3_BUCKET non défini. Utilisation du mode local.")
+        ensure_games_json_present()
         ensure_reviews_present()
         return
 
-    logger.info(f"[s3] Vérification du ZIP sur le bucket : {S3_BUCKET}")
-    # 2. Gérer uniquement le ZIP des REVIEWS sur S3
+    logger.info(f"[s3] Vérification des fichiers sur le bucket : {S3_BUCKET}")
+    # Vérifie et upload sur S3 si absent (pour les deux fichiers)
+    ensure_reviews_zip_on_s3(S3_BUCKET, S3_GAMES_KEY, GAMES_JSON_URL)
     ensure_reviews_zip_on_s3(S3_BUCKET, S3_REVIEWS_KEY, REVIEWS_ZIP_URL)
 
 
@@ -693,34 +691,24 @@ def main():
         logger.warning("[main] games.json est vide, suppression pour retéléchargement...")
         GAMES_JSON_PATH.unlink()
 
-    # --- TÉLÉCHARGEMENT ---
-    ensure_data_files_present()
+    ensure_data_files_present() # Vérifie S3 pour les deux fichiers
     
     env = load_env(ENV_PATH)
     db = get_db_from_env(env)
-
-    # ----------------------------------------------------------------------
-    # 1. GAMES (On ajoute un try/except pour le JSON corrompu)
-    # ----------------------------------------------------------------------
     existing = set(db.list_collection_names())
-    try:
-        if GAMES_COLLECTION not in existing:
-            logger.info("[games] Importing games...")
-            import_games(db, build_indexes=args.build_indexes)
-        else:
-            logger.info("[games] Collection exists, skipping.")
-    except json.JSONDecodeError:
-        logger.error("[critical] games.json est corrompu. Supprimez le fichier et relancez.")
-        GAMES_JSON_PATH.unlink(missing_ok=True)
-        return
 
-    # ----------------------------------------------------------------------
-    # 2. REVIEWS (C'est ici que ton streaming sauve le disque)
-    # ----------------------------------------------------------------------
-    if REVIEWS_COLLECTION not in set(db.list_collection_names()):
-        import_reviews(db, build_indexes=args.build_indexes)
+    # 1. GAMES (Nouveau mode S3 Streaming)
+    if GAMES_COLLECTION not in existing:
+        if S3_BUCKET:
+            import_games_from_s3(db, build_indexes=args.build_indexes)
+        else:
+            import_games(db, build_indexes=args.build_indexes) # Fallback local
     else:
-        logger.info("[reviews] Collection exists, skipping.")
+        logger.info("[games] Collection exists, skipping.")
+
+    # 2. REVIEWS (Déjà en streaming S3 dans votre code)
+    if REVIEWS_COLLECTION not in existing:
+        import_reviews(db, build_indexes=args.build_indexes)
 
     # ----------------------------------------------------------------------
     # 3. USERS
