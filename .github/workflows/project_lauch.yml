@@ -11,9 +11,7 @@ jobs:
     steps:
       # 1. Récupération du code avec LFS
       - uses: actions/checkout@v4
-        with:
-          lfs: true
-          fetch-depth: 0
+
       # ÉTAPE DE NETTOYAGE :
       - name: Free Disk Space
         run: |
