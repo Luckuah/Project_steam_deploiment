@@ -340,67 +340,62 @@ def import_games_from_s3(db, build_indexes: bool = False):
 # Reviews import (Version optimisée pour App Runner)
 # ---------------------------------------------------------------------------
 
+from smart_open import open as smart_open
+
 def import_reviews(db, build_indexes=True):
-    """
-    Version optimisée pour ZIP de 4Go+ sur App Runner.
-    Lit le flux S3 sans chargement en RAM et sans stockage disque.
-    """
-    import io
     from pymongo import UpdateOne
+    import io
     
-    s3 = boto3.client('s3')
     collection = db[REVIEWS_COLLECTION]
+    s3_url = f"s3://{S3_BUCKET}/{S3_REVIEWS_KEY}"
     
-    logger.info(f"[reviews] Streaming S3 (4GB+) : s3://{S3_BUCKET}/{S3_REVIEWS_KEY}")
+    logger.info(f"[reviews] Streaming intelligent (4GB+) : {s3_url}")
     
     try:
-        # On récupère l'objet sans le télécharger
-        response = s3.get_object(Bucket=S3_BUCKET, Key=S3_REVIEWS_KEY)
-        
-        # On utilise SeekableUnicodeStreamReader ou un wrapper pour simuler un fichier
-        # Pour 4Go, on doit utiliser 'Body' comme un flux binaire
-        with zipfile.ZipFile(response['Body']) as z:
-            csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
-            
-            with z.open(csv_filename) as f:
-                # TextIOWrapper lit le CSV ligne par ligne (très faible conso RAM)
-                reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
+        # smart_open gère le flux S3 de manière transparente
+        with smart_open(s3_url, 'rb') as s3_stream:
+            with zipfile.ZipFile(s3_stream) as z:
+                csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
                 
-                batch = []
-                total_inserted = 0
-                
-                for row in reader:
-                    user_id = row.get("author_steamid")
-                    review_id = row.get("review_id")
+                with z.open(csv_filename) as f:
+                    # On décode le flux CSV ligne par ligne
+                    reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                     
-                    if not review_id or not user_id:
-                        continue
-
-                    doc = {
-                        "app_id": int(row["app_id"]) if row.get("app_id") else None,
-                        "review_id": review_id,
-                        "user": user_id,
-                        "timestamp_created": int(row.get("timestamp_created", 0)),
-                        "recommended": row.get("recommended") == "True"
-                    }
+                    batch = []
+                    total_inserted = 0
                     
-                    batch.append(UpdateOne({"review_id": review_id}, {"$set": doc}, upsert=True))
+                    for row in reader:
+                        user_id = row.get("author_steamid")
+                        review_id = row.get("review_id")
+                        
+                        if not review_id or not user_id:
+                            continue
 
-                    if len(batch) >= 2000: # Batch plus petit pour plus de stabilité
+                        doc = {
+                            "app_id": int(row["app_id"]) if row.get("app_id") else None,
+                            "review_id": review_id,
+                            "user": user_id,
+                            "timestamp_created": int(row.get("timestamp_created", 0)),
+                            "recommended": row.get("recommended") == "True"
+                        }
+                        
+                        batch.append(UpdateOne({"review_id": review_id}, {"$set": doc}, upsert=True))
+
+                        if len(batch) >= 2000:
+                            collection.bulk_write(batch, ordered=False)
+                            total_inserted += len(batch)
+                            if total_inserted % 10000 == 0:
+                                logger.info(f"💾 {total_inserted} reviews insérées...")
+                            batch = []
+
+                    if batch:
                         collection.bulk_write(batch, ordered=False)
                         total_inserted += len(batch)
-                        if total_inserted % 10000 == 0:
-                            logger.info(f"💾 {total_inserted} reviews insérées...")
-                        batch = []
 
-                if batch:
-                    collection.bulk_write(batch, ordered=False)
-                    total_inserted += len(batch)
-
-        logger.info(f"✅ Terminé : {total_inserted} documents importés.")
+        logger.info(f"✅ Succès : {total_inserted} reviews importées.")
 
     except Exception as e:
-        logger.error(f"❌ Erreur streaming 4GB: {e}")
+        logger.error(f"❌ Erreur critique sur le fichier 4Go : {e}")
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
 # ---------------------------------------------------------------------------

@@ -32,3 +32,4 @@ python-dotenv
 hf_xet
 kmeans_pytorch
 ijson
+smart_open[s3]
