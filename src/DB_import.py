@@ -713,9 +713,7 @@ def main():
     else:
         logger.info("[games] Collection exists, skipping.")
 
-    # 2. REVIEWS (Déjà en streaming S3 dans votre code)
-    if REVIEWS_COLLECTION not in existing:
-        import_reviews(db, build_indexes=args.build_indexes)
+    import_reviews(db, build_indexes=args.build_indexes)
 
     # ----------------------------------------------------------------------
     # 3. USERS
