@@ -658,19 +658,18 @@ def ensure_reviews_present() -> None:
     _download_file(REVIEWS_ZIP_URL, tmp_zip_path)
 
 def ensure_data_files_present() -> None:
-    """Flux 100% S3 : Télécharge de Mendeley vers S3 si nécessaire."""
+    """S'assure que games.json est en local et que le ZIP est sur S3."""
+    # 1. Toujours s'assurer que games.json est présent en LOCAL (/tmp/data)
+    # car import_games() en a besoin physiquement.
+    ensure_games_json_present() 
+
     if not S3_BUCKET:
-        logger.warning("[s3] S3_BUCKET non défini. Passage en mode local classique.")
-        ensure_games_json_present()
+        logger.warning("[s3] S3_BUCKET non défini. On télécharge aussi le ZIP en local.")
         ensure_reviews_present()
         return
 
-    logger.info(f"[s3] Vérification des fichiers sur le bucket : {S3_BUCKET}")
-    
-    # 1. Gérer GAMES JSON
-    ensure_reviews_zip_on_s3(S3_BUCKET, S3_GAMES_KEY, GAMES_JSON_URL)
-    
-    # 2. Gérer REVIEWS ZIP
+    logger.info(f"[s3] Vérification du ZIP sur le bucket : {S3_BUCKET}")
+    # 2. Gérer uniquement le ZIP des REVIEWS sur S3
     ensure_reviews_zip_on_s3(S3_BUCKET, S3_REVIEWS_KEY, REVIEWS_ZIP_URL)
 
 
