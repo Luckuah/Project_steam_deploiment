@@ -342,60 +342,91 @@ def import_games_from_s3(db, build_indexes: bool = False):
 
 from smart_open import open as smart_open
 
-def import_reviews(db, build_indexes=True):
-    from pymongo import UpdateOne
-    import io
-    
-    collection = db[REVIEWS_COLLECTION]
+def import_reviews(db, build_indexes: bool = False):
+    """
+    Version S3 du code local : lit le ZIP de 4Go en streaming 
+    et mappe les champs selon le format S3.
+    """
+    col = db[REVIEWS_COLLECTION]
+    # IMPORTANT : On vide la collection car on fait des InsertOne (plus rapide)
+    logger.info("[reviews] Nettoyage de la collection avant import...")
+    col.drop()
+
     s3_url = f"s3://{S3_BUCKET}/{S3_REVIEWS_KEY}"
-    
-    logger.info(f"[reviews] Streaming intelligent (4GB+) : {s3_url}")
-    
+    logger.info(f"[reviews] Streaming depuis S3 : {s3_url}")
+
     try:
-        # smart_open gère le flux S3 de manière transparente
+        # smart_open ouvre le fichier S3 comme un fichier local
         with smart_open(s3_url, 'rb') as s3_stream:
             with zipfile.ZipFile(s3_stream) as z:
-                csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
+                # On récupère le nom du fichier CSV à l'intérieur du ZIP
+                csv_files = [f for f in z.namelist() if f.endswith('.csv')]
+                if not csv_files:
+                    logger.error("Aucun CSV trouvé dans le ZIP S3")
+                    return
                 
+                csv_filename = csv_files[0]
+                logger.info(f"[reviews] Lecture du fichier interne : {csv_filename}")
+
                 with z.open(csv_filename) as f:
-                    # On décode le flux CSV ligne par ligne
+                    # io.TextIOWrapper permet de lire ligne par ligne en mémoire
                     reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                     
                     batch = []
                     total_inserted = 0
                     
                     for row in reader:
-                        user_id = row.get("author_steamid")
-                        review_id = row.get("review_id")
+                        # --- MAPPING FLEXIBLE (Local vs S3) ---
+                        # On essaie les deux noms pour chaque champ
+                        user = (row.get("user") or row.get("author_steamid") or "").strip()
+                        review_text = (row.get("review") or row.get("review_text") or "").strip()
                         
-                        if not review_id or not user_id:
+                        if not user or not review_text:
                             continue
 
-                        doc = {
-                            "app_id": int(row["app_id"]) if row.get("app_id") else None,
-                            "review_id": review_id,
-                            "user": user_id,
-                            "timestamp_created": int(row.get("timestamp_created", 0)),
-                            "recommended": row.get("recommended") == "True"
-                        }
-                        
-                        batch.append(UpdateOne({"review_id": review_id}, {"$set": doc}, upsert=True))
+                        # Gestion de la date (Timestamp S3 vs Format Local)
+                        raw_date = row.get("timestamp_created")
+                        if raw_date and raw_date.isdigit():
+                            post_date = datetime.fromtimestamp(int(raw_date))
+                        else:
+                            post_date = parse_date_mdy_long(row.get("post_date"))
 
-                        if len(batch) >= 2000:
-                            collection.bulk_write(batch, ordered=False)
+                        # Reconstruction du document avec ta logique locale
+                        doc = {
+                            "app_id": int(row.get("app_id", 0)),
+                            "user": user,
+                            "playtime": float(row.get("playtime") or row.get("author_playtime_forever") or 0),
+                            "post_date": post_date,
+                            "helpfulness": int(row.get("helpfulness") or row.get("votes_up") or 0),
+                            "review_text": review_text,
+                            "recommend": row.get("recommend") == "Recommended" or row.get("recommended") == "True",
+                            "source_file": csv_filename
+                        }
+
+                        batch.append(InsertOne(doc))
+
+                        # Envoi par paquets de 5000 pour la performance
+                        if len(batch) >= 5000:
+                            col.bulk_write(batch, ordered=False)
                             total_inserted += len(batch)
-                            if total_inserted % 10000 == 0:
-                                logger.info(f"💾 {total_inserted} reviews insérées...")
+                            if total_inserted % 50000 == 0:
+                                logger.info(f"💾 {total_inserted} reviews importées...")
                             batch = []
 
                     if batch:
-                        collection.bulk_write(batch, ordered=False)
+                        col.bulk_write(batch, ordered=False)
                         total_inserted += len(batch)
 
-        logger.info(f"✅ Succès : {total_inserted} reviews importées.")
+        logger.info(f"✅ Import terminé : {total_inserted} documents insérés.")
+
+        # --- INDEXATION (Ta logique locale) ---
+        if build_indexes:
+            logger.info("[reviews] Création des index...")
+            col.create_index([("app_id", 1), ("user", 1)])
+            col.create_index([("review_text", "text")])
 
     except Exception as e:
-        logger.error(f"❌ Erreur critique sur le fichier 4Go : {e}")
+        logger.error(f"❌ Erreur critique pendant l'import S3 : {e}")
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
 # ---------------------------------------------------------------------------
