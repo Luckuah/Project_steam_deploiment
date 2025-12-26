@@ -9,7 +9,7 @@ jobs:
     environment: aws
 
     steps:
-      # 1. Récupération du code avec LFS
+      # 1. Récupération du code
       - uses: actions/checkout@v4
 
       # ÉTAPE DE NETTOYAGE :
@@ -21,18 +21,7 @@ jobs:
           sudo rm -rf "/usr/local/share/boost"
           sudo docker image prune -a -f
 
-      # 2. Forcer le téléchargement des données réelles
-      - name: Force LFS Pull and Verify
-        run: |
-          git lfs install
-          git lfs pull
-          if grep -q "version https" src/NLGCL/dataset/game/game.inter; then
-            echo "❌ ERREUR : Les fichiers LFS sont encore des pointeurs !"
-            exit 1
-          else
-            echo "✅ SUCCÈS : Données réelles téléchargées."
-          fi
-
+      
       # 3. Installation de Terraform (DÉPLACÉ ICI)
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -70,7 +59,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      # 8. Build et Push avec les données LFS
+      # 8. Build et Push avec les données
       - name: Build, tag, and push image to Amazon ECR
         run: |
           # Maintenant terraform est bien installé et peut donner l'output
