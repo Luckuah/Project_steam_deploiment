@@ -11,6 +11,8 @@ import pandas as pd
 from pymongo import MongoClient
 import boto3
 
+logger = logging.getLogger(__name__)
+
 def download_model_from_s3(model_name):
     """Télécharge le modèle depuis S3 vers /tmp s'il n'est pas déjà présent."""
     s3_bucket = os.getenv("S3_BUCKET")
@@ -26,6 +28,28 @@ def download_model_from_s3(model_name):
         getLogger().info(f"ℹ️ Modèle {model_name} déjà présent dans /tmp.")
     
     return local_path
+
+def download_dataset_from_s3(dataset_name, bucket_name):
+    """
+    Télécharge game.inter depuis S3 vers le dossier local attendu par RecBole
+    """
+    s3 = boto3.client('s3')
+    # RecBole cherche par défaut dans : dataset_path / dataset_name / dataset_name.inter
+    local_dir = f"./dataset/{dataset_name}"
+    local_path = f"{local_dir}/{dataset_name}.inter"
+    
+    if not os.path.exists(local_dir):
+        os.makedirs(local_dir, exist_ok=True)
+
+    if not os.path.exists(local_path):
+        logger.info(f"📥 Téléchargement du dataset {dataset_name}.inter depuis S3...")
+        try:
+            s3.download_file(bucket_name, f"dataset/{dataset_name}/{dataset_name}.inter", local_path)
+            logger.info("✅ Dataset téléchargé avec succès.")
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du téléchargement du dataset : {e}")
+            raise
+    return local_dir
 
 def normalize_path(path: str) -> str:
     """
@@ -88,14 +112,21 @@ def recommend_topk(model, dataset, train_data, user_id, topk=30, device='cpu'):
 def setup_recbole_model(model_path, dataset_name, config_file_list):
 
     model_filename = "NLGCL-Dec-02-2025_17-09-34.pth"
+    s3_bucket = os.getenv("S3_BUCKET")
     # --- NOUVEAU : Récupération depuis S3 ---
     # On passe le nom du fichier (NLGCL-Dec-02-2025_17-09-34.pth)
     # et on récupère le chemin local (/tmp/NLGCL-...)
     model_path = download_model_from_s3(model_filename)
 
-    # --- 1. Charger la config ---
+    
+    # On télécharge les données AVANT que RecBole ne cherche à initialiser la Config
+    try:
+        download_dataset_from_s3(dataset_name, s3_bucket)
+    except Exception as e:
+        getLogger().error(f"Impossible de continuer sans le dataset: {e}")
+        raise
+    
     config = Config(model="NLGCL", dataset=dataset_name, config_file_list=config_file_list)
-    # ... (reste de ton code inchangé jusqu'au chargement du checkpoint)
 
 
     # --- 2. Suppression du cache pour forcer la recréation du Dataset ---
