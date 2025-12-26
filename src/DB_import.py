@@ -91,7 +91,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 
 ENV_PATH = BASE_DIR / ".env"  # src/.env
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path("/tmp/data")
 GAMES_JSON_PATH = DATA_DIR / "games.json"
 REVIEWS_DIR = DATA_DIR / "Game Reviews"
 
@@ -625,19 +625,20 @@ def _extract_reviews_zip_flat(zip_path: Path, dest_dir: Path) -> None:
 
     if extracted_count == 0:
         logger.warning("[data] No CSV files were found in %s", zip_path)
+        
 def ensure_games_json_present() -> None:
     """
     Ensure games.json is present in DATA_DIR.
     If missing, download it.
     """
-    if GAMES_JSON_PATH.exists():
-        logger.info("[data] Found games JSON at %s", GAMES_JSON_PATH)
+    if GAMES_JSON_PATH.exists() and GAMES_JSON_PATH.stat().st_size > 0:
+        logger.info("[data] games.json trouvé dans /tmp")
         return
 
-    logger.warning("[data] games.json not found at %s", GAMES_JSON_PATH)
-    logger.info("[data] Attempting to download games JSON from Mendeley...")
+    logger.info("[data] Téléchargement de games.json depuis Mendeley vers /tmp...")
+    DATA_DIR.mkdir(parents=True, exist_ok=True) # Crée /tmp/data
     _download_file(GAMES_JSON_URL, GAMES_JSON_PATH)
-    logger.info("[data] games.json is now available at %s", GAMES_JSON_PATH)
+
 
 def ensure_reviews_present() -> None:
     """
