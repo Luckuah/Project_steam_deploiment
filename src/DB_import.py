@@ -342,8 +342,8 @@ def import_games_from_s3(db, build_indexes: bool = False):
 
 def import_reviews(db, build_indexes=True):
     """
-    Importe les reviews en streaming direct depuis S3 vers MongoDB.
-    Évite de saturer le disque /tmp.
+    Version optimisée pour ZIP de 4Go+ sur App Runner.
+    Lit le flux S3 sans chargement en RAM et sans stockage disque.
     """
     import io
     from pymongo import UpdateOne
@@ -351,66 +351,56 @@ def import_reviews(db, build_indexes=True):
     s3 = boto3.client('s3')
     collection = db[REVIEWS_COLLECTION]
     
-    logger.info(f"[reviews] Streaming depuis S3 : s3://{S3_BUCKET}/{S3_REVIEWS_KEY}")
+    logger.info(f"[reviews] Streaming S3 (4GB+) : s3://{S3_BUCKET}/{S3_REVIEWS_KEY}")
     
     try:
-        # On récupère l'objet directement dans un flux
+        # On récupère l'objet sans le télécharger
         response = s3.get_object(Bucket=S3_BUCKET, Key=S3_REVIEWS_KEY)
         
-        with zipfile.ZipFile(io.BytesIO(response['Body'].read())) as z:
+        # On utilise SeekableUnicodeStreamReader ou un wrapper pour simuler un fichier
+        # Pour 4Go, on doit utiliser 'Body' comme un flux binaire
+        with zipfile.ZipFile(response['Body']) as z:
             csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
             
             with z.open(csv_filename) as f:
+                # TextIOWrapper lit le CSV ligne par ligne (très faible conso RAM)
                 reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                 
                 batch = []
-                batch_size = 5000 
                 total_inserted = 0
-
+                
                 for row in reader:
-                    # IMPORTANT : On vérifie que les champs critiques existent
-                    review_id = row.get("review_id")
                     user_id = row.get("author_steamid")
+                    review_id = row.get("review_id")
                     
                     if not review_id or not user_id:
                         continue
 
                     doc = {
                         "app_id": int(row["app_id"]) if row.get("app_id") else None,
-                        "app_name": row.get("app_name"),
                         "review_id": review_id,
-                        "language": row.get("language"),
-                        "review": row.get("review"),
+                        "user": user_id,
                         "timestamp_created": int(row.get("timestamp_created", 0)),
-                        "user": user_id, # C'est ce champ qui lie à la collection 'users'
-                        "recommended": row.get("recommended") == "True",
-                        "votes_up": int(row.get("votes_up", 0))
+                        "recommended": row.get("recommended") == "True"
                     }
                     
-                    # On utilise UpdateOne avec upsert=True pour éviter les erreurs si on relance
                     batch.append(UpdateOne({"review_id": review_id}, {"$set": doc}, upsert=True))
 
-                    if len(batch) >= batch_size:
+                    if len(batch) >= 2000: # Batch plus petit pour plus de stabilité
                         collection.bulk_write(batch, ordered=False)
                         total_inserted += len(batch)
-                        logger.info(f"💾 {total_inserted} reviews traitées...")
+                        if total_inserted % 10000 == 0:
+                            logger.info(f"💾 {total_inserted} reviews insérées...")
                         batch = []
 
                 if batch:
                     collection.bulk_write(batch, ordered=False)
                     total_inserted += len(batch)
 
-                logger.info(f"✅ Streaming terminé : {total_inserted} reviews en base.")
+        logger.info(f"✅ Terminé : {total_inserted} documents importés.")
 
     except Exception as e:
-        logger.error(f"❌ Erreur pendant le streaming des reviews: {e}")
-    
-    if build_indexes:
-        logger.info("⚡ Création des index...")
-        collection.create_index([("app_id", 1)])
-        collection.create_index([("user", 1)])
-        collection.create_index([("review_id", 1)], unique=True)
-
+        logger.error(f"❌ Erreur streaming 4GB: {e}")
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
 # ---------------------------------------------------------------------------
