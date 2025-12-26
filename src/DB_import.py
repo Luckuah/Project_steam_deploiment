@@ -333,83 +333,88 @@ def import_games(db, build_indexes: bool = False):
 # Reviews import (Version optimisée pour App Runner)
 # ---------------------------------------------------------------------------
 
-def import_reviews(db, build_indexes: bool = False):
-    col = db[REVIEWS_COLLECTION]
+def import_reviews(db, build_indexes=True):
+    """
+    Importe les reviews depuis un ZIP stocké sur S3 vers MongoDB.
+    Utilise /tmp pour éviter les MemoryError.
+    """
+    import io
+    from pymongo import InsertOne
     
-    if S3_BUCKET:
-        logger.info("[reviews] Lecture du ZIP en streaming depuis S3...")
-        s3 = boto3.client('s3')
-        # On récupère l'objet S3 dans un buffer mémoire (BytesIO)
-        # Attention : si le ZIP fait 4Go, on utilise le streaming de boto3
-        response = s3.get_object(Bucket=S3_BUCKET, Key=S3_REVIEWS_KEY)
-        zip_stream = io.BytesIO(response['Body'].read()) 
-        zf_context = zipfile.ZipFile(zip_stream)
-    else:
-        # Mode local classique (fallback)
-        tmp_zip_path = DATA_DIR / "reviews_download.zip"
-        if not tmp_zip_path.exists(): return
-        zf_context = zipfile.ZipFile(tmp_zip_path, "r")
+    s3 = boto3.client('s3')
+    local_zip = "/tmp/reviews_download.zip"
+    collection = db[REVIEWS_COLLECTION]
 
-    with zf_context as zf:
-        csv_infos = [info for info in zf.infolist() if info.filename.lower().endswith(".csv") and not info.is_dir()]
-        logger.info("[reviews] %d fichiers trouvés dans le ZIP", len(csv_infos))
+    # 1. TÉLÉCHARGEMENT DU ZIP (Vers le disque, pas la RAM)
+    if not os.path.exists(local_zip):
+        logger.info("📥 Téléchargement du ZIP depuis S3 vers /tmp...")
+        try:
+            s3.download_file(S3_BUCKET, S3_REVIEWS_KEY, local_zip)
+            logger.info("✅ Téléchargement terminé.")
+        except Exception as e:
+            logger.error(f"❌ Erreur lors du téléchargement S3: {e}")
+            return
 
-        total_inserted = 0
-        for info in csv_infos:
-            filename = Path(info.filename).name
-            try:
-                app_id = int(filename.split("_", 1)[0])
-            except Exception:
-                continue
-
-            logger.info("[reviews] Importation : %s (app_id=%d)", filename, app_id)
+    # 2. LECTURE ET INSERTION PAR LOTS (BULK)
+    logger.info("📖 Lecture du ZIP et insertion dans MongoDB...")
+    try:
+        with zipfile.ZipFile(local_zip, 'r') as z:
+            # On identifie le fichier CSV à l'intérieur
+            csv_filename = [f for f in z.namelist() if f.endswith('.csv')][0]
             
-            with zf.open(info, "r") as f:
-                reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8"))
-                batch = []
+            with z.open(csv_filename) as f:
+                # TextIOWrapper permet de lire le flux binaire en texte ligne par ligne
+                reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                 
-                for row in reader:
-                    # Conversion sécurisée du playtime
-                    playtime = None
-                    try:
-                        raw_playtime = row.get("playtime")
-                        if raw_playtime:
-                            playtime = float(raw_playtime)
-                    except ValueError:
-                        pass
+                batch = []
+                batch_size = 5000  # Taille idéale pour l'équilibre vitesse/mémoire
+                total_inserted = 0
 
+                for row in reader:
+                    # Préparation du document
                     doc = {
-                        "app_id": app_id,
-                        "user": (row.get("user") or "").strip() or None,
-                        "playtime": playtime,
-                        "post_date": parse_date_mdy_long(row.get("post_date")),
-                        "recommend": coerce_bool_recommend(row.get("recommend")),
-                        "early_access": coerce_bool_early_access(row.get("early_access_review")),
+                        "app_id": row.get("app_id"),
+                        "app_name": row.get("app_name"),
+                        "review_id": row.get("review_id"),
+                        "language": row.get("language"),
+                        "review": row.get("review"),
+                        "timestamp_created": int(row.get("timestamp_created", 0)),
+                        "author_id": row.get("author_steamid"),
+                        "recommended": row.get("recommended") == "True",
+                        "votes_up": int(row.get("votes_up", 0))
                     }
-                    doc = {k: v for k, v in doc.items() if v is not None}
+                    
                     batch.append(InsertOne(doc))
 
-                    # Batch de 10 000 est un bon équilibre RAM/Vitesse
-                    if len(batch) >= 10000:
-                        res = col.bulk_write(batch, ordered=False)
-                        total_inserted += res.inserted_count
+                    # Si le lot est plein, on écrit dans la base
+                    if len(batch) >= batch_size:
+                        collection.bulk_write(batch, ordered=False)
+                        total_inserted += len(batch)
+                        logger.info(f"💾 {total_inserted} reviews insérées...")
                         batch = []
 
+                # Insertion du dernier lot restant
                 if batch:
-                    res = col.bulk_write(batch, ordered=False)
-                    total_inserted += res.inserted_count
+                    collection.bulk_write(batch, ordered=False)
+                    total_inserted += len(batch)
 
-    # LIBÉRATION DE L'ESPACE DISQUE IMMÉDIATE
-    logger.info("[reviews] Importation terminée. Suppression du ZIP (4.2 Go libérés).")
-    try:
-        tmp_zip_path.unlink()
+                logger.info(f"✅ Importation terminée : {total_inserted} documents au total.")
+
     except Exception as e:
-        logger.warning("[reviews] Impossible de supprimer le ZIP : %s", e)
+        logger.error(f"❌ Erreur pendant l'importation: {e}")
     
+    # 3. CRÉATION DES INDEX (Après l'import pour la performance)
     if build_indexes:
-        logger.info("[reviews] Création des index (cette étape peut être longue)...")
-        col.create_index([("app_id", ASCENDING), ("post_date", DESCENDING)])
-        col.create_index([("user", ASCENDING)])
+        logger.info("⚡ Création des index pour les reviews...")
+        collection.create_index([("app_id", 1)])
+        collection.create_index([("author_id", 1)])
+        collection.create_index([("review_id", 1)], unique=True)
+        logger.info("✅ Index créés.")
+
+    # Nettoyage optionnel du ZIP pour libérer de l'espace sur /tmp
+    if os.path.exists(local_zip):
+        os.remove(local_zip)
+        logger.info("🧹 Fichier temporaire supprimé.")
 
 # ---------------------------------------------------------------------------
 # Users build (from reviews)

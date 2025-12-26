@@ -85,7 +85,7 @@ def recommend_topk(model, dataset, train_data, user_id, topk=30, device='cpu'):
 
     return topk_items
 
-def setup_recbole_model(model_filename, dataset_name, config_file_list):
+def setup_recbole_model(model_path, dataset_name, config_file_list):
 
     model_filename = "NLGCL-Dec-02-2025_17-09-34.pth"
     # --- NOUVEAU : Récupération depuis S3 ---
