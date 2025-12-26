@@ -343,90 +343,66 @@ def import_games_from_s3(db, build_indexes: bool = False):
 from smart_open import open as smart_open
 
 def import_reviews(db, build_indexes: bool = False):
-    """
-    Version S3 du code local : lit le ZIP de 4Go en streaming 
-    et mappe les champs selon le format S3.
-    """
     col = db[REVIEWS_COLLECTION]
-    # IMPORTANT : On vide la collection car on fait des InsertOne (plus rapide)
-    logger.info("[reviews] Nettoyage de la collection avant import...")
     col.drop()
-
+    
     s3_url = f"s3://{S3_BUCKET}/{S3_REVIEWS_KEY}"
-    logger.info(f"[reviews] Streaming depuis S3 : {s3_url}")
+    logger.info(f"[reviews] Streaming de TOUS les fichiers du ZIP S3...")
+
+    total_inserted = 0
 
     try:
-        # smart_open ouvre le fichier S3 comme un fichier local
         with smart_open(s3_url, 'rb') as s3_stream:
             with zipfile.ZipFile(s3_stream) as z:
-                # On récupère le nom du fichier CSV à l'intérieur du ZIP
+                # 1. On récupère la liste de TOUS les CSV
                 csv_files = [f for f in z.namelist() if f.endswith('.csv')]
-                if not csv_files:
-                    logger.error("Aucun CSV trouvé dans le ZIP S3")
-                    return
                 
-                csv_filename = csv_files[0]
-                logger.info(f"[reviews] Lecture du fichier interne : {csv_filename}")
+                batch = []
+                # 2. BOUCLE SUR CHAQUE FICHIER (Indispensable !)
+                for csv_filename in csv_files:
+                    
+                    # 3. EXTRACTION DE L'APP_ID DEPUIS LE NOM (Logique locale)
+                    # "Game Reviews/1000000_37.csv" -> "1000000"
+                    try:
+                        pure_name = csv_filename.split('/')[-1] # Enlever le dossier
+                        file_app_id = int(pure_name.split('_')[0])
+                    except:
+                        file_app_id = 0
 
-                with z.open(csv_filename) as f:
-                    # io.TextIOWrapper permet de lire ligne par ligne en mémoire
-                    reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
-                    
-                    batch = []
-                    total_inserted = 0
-                    
-                    for row in reader:
-                        # --- MAPPING FLEXIBLE (Local vs S3) ---
-                        # On essaie les deux noms pour chaque champ
-                        user = (row.get("user") or row.get("author_steamid") or "").strip()
-                        review_text = (row.get("review") or row.get("review_text") or "").strip()
+                    with z.open(csv_filename) as f:
+                        reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
                         
-                        if not user or not review_text:
-                            continue
+                        for row in reader:
+                            user = (row.get("user") or row.get("author_steamid") or "").strip()
+                            review_text = (row.get("review") or row.get("review_text") or "").strip()
+                            
+                            if not user or not review_text:
+                                continue
 
-                        # Gestion de la date (Timestamp S3 vs Format Local)
-                        raw_date = row.get("timestamp_created")
-                        if raw_date and raw_date.isdigit():
-                            post_date = datetime.fromtimestamp(int(raw_date))
-                        else:
-                            post_date = parse_date_mdy_long(row.get("post_date"))
+                            doc = {
+                                "app_id": file_app_id, # On utilise l'ID extrait du nom
+                                "user": user,
+                                "playtime": float(row.get("playtime") or row.get("author_playtime_forever") or 0),
+                                "review_text": review_text,
+                                "recommend": row.get("recommend") == "Recommended" or row.get("recommended") == "True",
+                                "source_file": csv_filename
+                            }
 
-                        # Reconstruction du document avec ta logique locale
-                        doc = {
-                            "app_id": int(row.get("app_id", 0)),
-                            "user": user,
-                            "playtime": float(row.get("playtime") or row.get("author_playtime_forever") or 0),
-                            "post_date": post_date,
-                            "helpfulness": int(row.get("helpfulness") or row.get("votes_up") or 0),
-                            "review_text": review_text,
-                            "recommend": row.get("recommend") == "Recommended" or row.get("recommended") == "True",
-                            "source_file": csv_filename
-                        }
+                            batch.append(InsertOne(doc))
 
-                        batch.append(InsertOne(doc))
+                            if len(batch) >= 5000:
+                                col.bulk_write(batch, ordered=False)
+                                total_inserted += len(batch)
+                                batch = []
 
-                        # Envoi par paquets de 5000 pour la performance
-                        if len(batch) >= 5000:
-                            col.bulk_write(batch, ordered=False)
-                            total_inserted += len(batch)
-                            if total_inserted % 50000 == 0:
-                                logger.info(f"💾 {total_inserted} reviews importées...")
-                            batch = []
+                if batch:
+                    col.bulk_write(batch, ordered=False)
+                    total_inserted += len(batch)
 
-                    if batch:
-                        col.bulk_write(batch, ordered=False)
-                        total_inserted += len(batch)
-
-        logger.info(f"✅ Import terminé : {total_inserted} documents insérés.")
-
-        # --- INDEXATION (Ta logique locale) ---
-        if build_indexes:
-            logger.info("[reviews] Création des index...")
-            col.create_index([("app_id", 1), ("user", 1)])
-            col.create_index([("review_text", "text")])
+        logger.info(f"✅ Terminé : {total_inserted} documents importés.")
 
     except Exception as e:
-        logger.error(f"❌ Erreur critique pendant l'import S3 : {e}")
+        logger.error(f"❌ Erreur : {e}")
 # ---------------------------------------------------------------------------
 # Users build (from reviews)
 # ---------------------------------------------------------------------------
