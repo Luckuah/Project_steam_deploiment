@@ -18,6 +18,7 @@ import zipfile
 import shutil
 import io
 import os
+from decimal import Decimal
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -297,6 +298,12 @@ def import_games_from_s3(db, build_indexes: bool = False):
         for k, v in parser:
             # Reconstitution du document avec son ID
             doc = {**v, "_id": int(k) if str(k).isdigit() else k}
+
+            # --- AJOUT DE LA CORRECTION ICI ---
+            # On convertit le prix de Decimal à float pour MongoDB
+            if "price" in doc and isinstance(doc["price"], Decimal):
+                doc["price"] = float(doc["price"])
+            # ----------------------------------
             
             # Parsing de la date (réutilisation de votre helper)
             rd = doc.get("release_date")
