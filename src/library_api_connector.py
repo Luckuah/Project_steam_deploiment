@@ -12,8 +12,8 @@ env_vars = {
     )
 }
 
-Host_ip = env_vars.get("API_BASE_IP", "localhost")
-Host_port = env_vars.get("API_BASE_PORT", "8000")
+Host_ip = env_vars.get("API_BASE_IP", "127.0.0.1")
+Host_port = env_vars.get("API_BASE_PORT", "27099")
 BASE_URL = f"http://{Host_ip}:{Host_port}"
 def get_default_game_reco(verbose=False):
     """
