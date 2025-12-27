@@ -13,19 +13,15 @@ from Library_fonctions import load_state_from_web_storage, save_state_to_web_sto
 from Library_fonctions import load_state_from_query,save_key_to_query,ensure_key_in_query
 from library_api_connector import gensar_recommendation_connector,recomandation_genral_connector
 import traceback
-import time
 load_state_from_query()
 ensure_key_in_query("User")
 ensure_key_in_query("game_name_magasin")
-
-st.write("⏳ 1. Initialisation de la page...")
-time.sleep(60)
 
 ## --- Local Storage for session persistence ---
 STORAGE_KEY = "App_Page"
 PERSIST_KEYS = ["game_reco"]
 
-load_state_from_web_storage(STORAGE_KEY,PERSIST_KEYS,max_age_seconds=180)
+€#load_state_from_web_storage(STORAGE_KEY,PERSIST_KEYS,max_age_seconds=180)
 
 st.set_page_config(page_title="Accueil", page_icon="🏠", layout="wide")
 # Masquer la sidebar automatique
