@@ -46,5 +46,4 @@ exec uv run streamlit run src/Application/app.py \
   --browser.gatherUsageStats false \
   --server.enableCORS false \
   --server.enableXsrfProtection false \
-  --server.enableWebsocketCompression false \
-  --server.corsAllowedOrigins uevvysmmbp.eu-west-3.awsapprunner.com
+  --server.headless true
