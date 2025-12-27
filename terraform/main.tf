@@ -49,10 +49,10 @@ resource "aws_security_group" "mongo_sg" {
     protocol    = "tcp"
     cidr_blocks = [module.vpc_G2MG03.vpc_cidr_block]
   }
-  
+
   ingress {
-    from_port   = 8501
-    to_port     = 8501
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"] # Permet au trafic public d'atteindre le port Streamlit
   }

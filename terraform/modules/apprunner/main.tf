@@ -111,7 +111,7 @@ resource "aws_apprunner_service" "service" {
       image_repository_type = "ECR"
 
       image_configuration {
-        port = "8501" # Port Streamlit (vérifiez votre Dockerfile, c'était 8501 pas 8080)
+        port = "8080" # Port Streamlit
         
         # --- VARIABLES POUR MONGO ---
         runtime_environment_variables = {
