@@ -87,7 +87,8 @@ db_ip = os.getenv("DB_IP", "mongo.steam.internal")
 db_port = os.getenv("DB_PORT", "27017")
 db_name = os.getenv("DB_NAME", "Steam_Project")
 
-uri = f"mongodb://{username}:{password}@{db_ip}:{db_port}/?authSource=admin"
+uri = "mongodb://user:pass@mongo.steam.internal:27017/?authSource=admin"
+
 
 # Short timeout so we don't block forever if Mongo is down
 client = MongoClient(uri, serverSelectionTimeoutMS=2000)
