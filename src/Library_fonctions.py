@@ -42,8 +42,9 @@ def load_state_from_web_storage(
     resp = _unwrap_local_storage(streamlit_js_eval(js_expressions=js, key=f"hydrate_{storage_api}_{storage_key_name}", want_output=True))
 
     if resp is None or not isinstance(resp, dict) or not resp.get("ready", False):
-        with st.spinner(spinner_msg):
-            st.stop()
+    # On ne fait rien, on laisse Streamlit continuer le rendu de la page
+    # L'app se rechargera d'elle-même quand le composant sera prêt.
+        return
 
     raw = resp.get("value", None)  # may be null/None if key missing
 
