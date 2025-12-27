@@ -95,8 +95,8 @@ db = client[db_name]
 
 #Load the model
 try:
-    model_path = normalize_path("NLGCL\\saved\\NLGCL-Dec-02-2025_17-09-34.pth")
-    config_file_list = [normalize_path("NLGCL\\properties\\game.yaml")]
+    model_path = normalize_path("src\\NLGCL\\saved\\NLGCL-Dec-02-2025_17-09-34.pth")
+    config_file_list = [normalize_path("src\\NLGCL\\properties\\game.yaml")]
     print(model_path,config_file_list)
     NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(
         model_path=model_path,
