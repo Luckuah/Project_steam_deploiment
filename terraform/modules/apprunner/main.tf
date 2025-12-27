@@ -136,10 +136,10 @@ resource "aws_apprunner_service" "service" {
   health_check_configuration {
     protocol            = "HTTP"
     path                = "/"
-    interval            = 10
-    timeout             = 5
+    interval            = 20
+    timeout             = 15
     healthy_threshold   = 1
-    unhealthy_threshold = 5
+    unhealthy_threshold = 20
   }
 
   tags = {

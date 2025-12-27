@@ -43,7 +43,6 @@ echo "[START] Starting Streamlit on port 8501..."
 exec uv run streamlit run src/Application/app.py \
   --server.port 8501 \
   --server.address 0.0.0.0 \
-  --browser.gatherUsageStats false \
+  --server.headless true \
   --server.enableCORS false \
-  --server.enableXsrfProtection false \
-  --server.headless true
+  --server.enableXsrfProtection false
