@@ -23,16 +23,8 @@ WORKDIR /app
 COPY . /app
 
 # Ensure src/.env exists with container-friendly defaults (only if missing)
-RUN mkdir -p src \
- && if [ ! -f src/.env ]; then \
-      printf '%s\n' \
-'API_BASE_IP=localhost' \
-'API_BASE_PORT=27099' \
-'DB_USER=User' \
-'DB_PASSWORD=Pass' \
-'DB_IP=mongo.steam.internal' \
-'DB_PORT=27017' \
-'DB_NAME=Steam_Project' > src/.env; \
+RUN if [ ! -f .env ]; then \
+     printf 'API_BASE_IP=0.0.0.0\nAPI_BASE_PORT=27099\nDB_USER=User\nDB_PASSWORD=Pass\nDB_IP=mongo.steam.internal\nDB_PORT=27017\nDB_NAME=Steam_Project\n' > .env; \
     fi
 
 # Create uv venv and install Python dependencies at build time
