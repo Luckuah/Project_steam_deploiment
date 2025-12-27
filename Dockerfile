@@ -23,8 +23,16 @@ WORKDIR /app
 COPY . /app
 
 # Ensure src/.env exists with container-friendly defaults (only if missing)
-RUN if [ ! -f .env ]; then \
-     printf 'API_BASE_IP=0.0.0.0\nAPI_BASE_PORT=27099\nDB_USER=User\nDB_PASSWORD=Pass\nDB_IP=mongo.steam.internal\nDB_PORT=27017\nDB_NAME=Steam_Project\n' > .env; \
+RUN mkdir -p src \
+ && if [ ! -f src/.env ]; then \
+      printf '%s\n' \
+'API_BASE_IP=localhost' \
+'API_BASE_PORT=27099' \
+'DB_USER=User' \
+'DB_PASSWORD=Pass' \
+'DB_IP=mongo.steam.internal' \
+'DB_PORT=27017' \
+'DB_NAME=Steam_Project' > src/.env; \
     fi
 
 # Create uv venv and install Python dependencies at build time
@@ -34,18 +42,6 @@ RUN uv venv .venv -p 3.13.7 && \
 RUN uv pip install boto3 requests pymongo rich
 
 # Expose app ports
-# Création du dossier et du fichier de config Streamlit
-RUN mkdir -p /root/.streamlit && \
-    printf "[server]\n\
-port = 8080\n\
-address = \"0.0.0.0\"\n\
-enableCORS = false\n\
-enableXsrfProtection = false\n\
-headless = true\n\
-\n\
-[browser]\n\
-gatherUsageStats = false\n\
-" > /root/.streamlit/config.toml
 EXPOSE 8080
 EXPOSE 27099
 

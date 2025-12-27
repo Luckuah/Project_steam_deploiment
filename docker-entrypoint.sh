@@ -1,8 +1,7 @@
 #!/bin/sh
 set -eu
 
-# On se place à la racine
-cd /app
+
 
 API_PORT="${API_BASE_PORT:-27099}"
 DB_IP="${DB_IP:-mongo.steam.internal}"
@@ -29,6 +28,9 @@ init_database_async() {
 
 # 1) Lancer l'initialisation de la DB en fond
 init_database_async &
+
+# On se place à la racine
+cd /app
 
 # 2) Lancer l'API en fond
 echo "[START] Starting API..."
