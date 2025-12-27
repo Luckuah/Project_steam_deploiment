@@ -41,6 +41,10 @@ echo "[START] Starting API..."
 # 3) Lancer Streamlit au PREMIER PLAN (C'est lui qui valide le déploiement)
 echo "[START] Starting Streamlit on port 8501..."
 exec uv run streamlit run src/Application/app.py \
-    --server.port 8501 \
-    --server.address 0.0.0.0 \
-    --browser.gatherUsageStats false
+  --server.port 8501 \
+  --server.address 0.0.0.0 \
+  --browser.gatherUsageStats false \
+  --server.enableCORS false \
+  --server.enableXsrfProtection false \
+  --server.enableWebsocketCompression false \
+  --server.allowWebsocketOrigin uevvysmmbp.eu-west-3.awsapprunner.com
