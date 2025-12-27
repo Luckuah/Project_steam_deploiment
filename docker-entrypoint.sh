@@ -37,7 +37,7 @@ uv run uvicorn API_DB:app --app-dir src --host 0.0.0.0 --port "${API_PORT}" &
 
 # 3) CONFIGURER STREAMLIT (C'est ce qui règle la page blanche)
 mkdir -p /.streamlit
-cat <<EOF > /app/.streamlit/config.toml
+cat <<EOF > /.streamlit/config.toml
 [server]
 port = 8080
 address = "0.0.0.0"
