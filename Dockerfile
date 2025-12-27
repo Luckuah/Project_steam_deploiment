@@ -42,6 +42,18 @@ RUN uv venv .venv -p 3.13.7 && \
 RUN uv pip install boto3 requests pymongo rich
 
 # Expose app ports
+# Création du dossier et du fichier de config Streamlit
+RUN mkdir -p /root/.streamlit && \
+    printf "[server]\n\
+port = 8080\n\
+address = \"0.0.0.0\"\n\
+enableCORS = false\n\
+enableXsrfProtection = false\n\
+headless = true\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+" > /root/.streamlit/config.toml
 EXPOSE 8080
 EXPOSE 27099
 

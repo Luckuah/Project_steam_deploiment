@@ -39,11 +39,10 @@ echo "[START] Starting API..."
 ) &
 
 # 3) Lancer Streamlit au PREMIER PLAN (C'est lui qui valide le déploiement)
-echo "[START] Starting Streamlit on port 8501..."
-PORT=${PORT:-8080}
-
-uv run streamlit run src/Application/app.py \
-  --server.port $PORT \
+# Remplacer la fin de ton docker-entrypoint.sh par ceci :
+echo "[START] Starting Streamlit on port 8080..."
+exec uv run streamlit run src/Application/app.py \
+  --server.port 8080 \
   --server.address 0.0.0.0 \
   --server.headless true \
   --server.enableCORS false \
