@@ -79,11 +79,14 @@ env_vars = {
 }
 
 # ---------- MongoDB CONFIG ----------
-username = env_vars.get("DB_USER", "user")
-password = env_vars.get("DB_PASSWORD", "pass")
-db_ip = env_vars.get("DB_IP", "localhost")
-db_port = env_vars.get("DB_PORT", "27017")
-db_name = env_vars.get("DB_NAME", "Steam_Project")
+# --- REMPLACE PAR CECI ---
+# os.getenv va lire les variables injectées par AWS App Runner / Docker
+username = os.getenv("DB_USER", "User")
+password = os.getenv("DB_PASSWORD", "Pass")
+db_ip = os.getenv("DB_IP", "mongo.steam.internal")
+db_port = os.getenv("DB_PORT", "27017")
+db_name = os.getenv("DB_NAME", "Steam_Project")
+
 uri = f"mongodb://{username}:{password}@{db_ip}:{db_port}/?authSource=admin"
 
 # Short timeout so we don't block forever if Mongo is down

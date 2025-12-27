@@ -692,8 +692,11 @@ def main():
             import_games(db, build_indexes=args.build_indexes) # Fallback local
     else:
         logger.info("[games] Collection exists, skipping.")
-
-    import_reviews(db, build_indexes=args.build_indexes)
+    
+    if REVIEWS_COLLECTION not in existing:
+        import_reviews(db, build_indexes=args.build_indexes)
+    else:
+        logger.info("[Review] Collection exists, skipping.")
 
     # ----------------------------------------------------------------------
     # 3. USERS
