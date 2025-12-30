@@ -94,22 +94,38 @@ client = MongoClient(uri, serverSelectionTimeoutMS=2000)
 db = client[db_name]
 
 #Load the model
-try:
-    model_path = normalize_path("NLGCL\\saved\\NLGCL-Dec-02-2025_17-09-34.pth")
-    config_file_list = [normalize_path("NLGCL\\properties\\game.yaml")]
-    print(model_path,config_file_list)
-    NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(
-        model_path=model_path,
-        dataset_name="game",
-        config_file_list=config_file_list
-    )
-except Exception as e:
-    print(f"\n--- ERREUR --- \nImpossible de charger les composants Recbole: {e}")
-    traceback.print_exc()
+from contextlib import asynccontextmanager
 
-# ---------- FASTAPI APP ----------
+# On définit des variables globales vides au début
+NLGCL_model = None
+NLGCL_dataset = None
+NLGCL_train_data = None
+NLGCL_device = None
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ce code s'exécute AU DÉMARRAGE de l'API
+    global NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device
+    try:
+        logger.info("🚀 Démarrage du chargement du modèle RecBole...")
+        model_path = normalize_path("NLGCL/saved/NLGCL-Dec-02-2025_17-09-34.pth")
+        config_file_list = [normalize_path("NLGCL/properties/game.yaml")]
+        
+        # Le chargement se fait ici
+        NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(
+            model_path=model_path,
+            dataset_name="game",
+            config_file_list=config_file_list
+        )
+        logger.info("✅ Modèle chargé avec succès !")
+    except Exception as e:
+        logger.error(f"❌ Erreur chargement modèle: {e}")
+    
+    yield
+    # Code ici pour l'arrêt de l'application (si besoin)
+
+# Initialise l'app avec le lifespan
+app = FastAPI(lifespan=lifespan)
 
 class CommandRequest(BaseModel):
     command: dict  # raw MongoDB command as a JSON object

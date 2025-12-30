@@ -103,6 +103,8 @@ resource "aws_apprunner_service" "service" {
           "S3_BUCKET"     = "terraform-state-g2-mg03"
           "DB_NAME"       = "Steam_Project"
           "RUN_DB_IMPORT" = "0" # Optionnel : éviter de réimporter à chaque restart
+          "DB_USER" = "User"
+          "DB_PASSWORD" = "Pass"
         }
       }
     }
@@ -119,7 +121,7 @@ resource "aws_apprunner_service" "service" {
     protocol            = "HTTP"
     path                = "/docs" 
     interval            = 20
-    timeout             = 15
+    timeout             = 19
     healthy_threshold   = 1
     unhealthy_threshold = 20
   }
