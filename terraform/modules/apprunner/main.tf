@@ -121,7 +121,7 @@ resource "aws_apprunner_service" "service" {
     protocol            = "HTTP"
     path                = "/docs" 
     interval            = 20
-    timeout             = 19
+    timeout             = 10
     healthy_threshold   = 1
     unhealthy_threshold = 20
   }

@@ -102,30 +102,27 @@ NLGCL_dataset = None
 NLGCL_train_data = None
 NLGCL_device = None
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Ce code s'exécute AU DÉMARRAGE de l'API
+import asyncio
+
+async def load_model_background():
     global NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device
     try:
-        logger.info("🚀 Démarrage du chargement du modèle RecBole...")
-        model_path = normalize_path("NLGCL/saved/NLGCL-Dec-02-2025_17-09-34.pth")
-        config_file_list = [normalize_path("NLGCL/properties/game.yaml")]
-        
-        # Le chargement se fait ici
-        NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(
-            model_path=model_path,
-            dataset_name="game",
-            config_file_list=config_file_list
-        )
-        logger.info("✅ Modèle chargé avec succès !")
+        # On lance le chargement lourd ici
+        NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(...)
     except Exception as e:
-        logger.error(f"❌ Erreur chargement modèle: {e}")
-    
-    yield
-    # Code ici pour l'arrêt de l'application (si besoin)
+        logger.error(f"❌ Erreur: {e}")
 
-# Initialise l'app avec le lifespan
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # On lance la tâche sans l'attendre (pas de await)
+    asyncio.create_task(load_model_background())
+    # On rend la main immédiatement à FastAPI pour qu'il ouvre le port
+    yield
 app = FastAPI(lifespan=lifespan)
+
+@app.get("/health") # Assurez-vous que le décorateur est bien présent
+def health_check_endpoint():
+    return {"status": "ok"}
 
 class CommandRequest(BaseModel):
     command: dict  # raw MongoDB command as a JSON object
