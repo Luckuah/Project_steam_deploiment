@@ -1,4 +1,4 @@
-# IAM Role for App Runner to access ECR [cite: 1]
+# IAM Role for App Runner to access ECR
 resource "aws_iam_role" "apprunner_ecr_access_role" {
   name = "${var.service_name}-ecr-access-role"
 
@@ -12,21 +12,15 @@ resource "aws_iam_role" "apprunner_ecr_access_role" {
       }
     }]
   })
-
-  tags = {
-    Name        = "${var.service_name}-ecr-access-role"
-    Environment = "dev"
-    Project     = "MLOps-G2MG03"
-  }
 }
 
-# Attach policy for ECR access [cite: 1]
+# Attach policy for ECR access
 resource "aws_iam_role_policy_attachment" "apprunner_ecr_policy" {
   role       = aws_iam_role.apprunner_ecr_access_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess"
 }
 
-# IAM Role for App Runner instance (application runtime) [cite: 3]
+# IAM Role for App Runner instance (application runtime)
 resource "aws_iam_role" "apprunner_instance_role" {
   name = "${var.service_name}-instance-role"
 
@@ -40,15 +34,9 @@ resource "aws_iam_role" "apprunner_instance_role" {
       }
     }]
   })
-
-  tags = {
-    Name        = "${var.service_name}-instance-role"
-    Environment = "dev"
-    Project     = "MLOps-G2MG03"
-  }
 }
 
-# Custom policy for App Runner to access S3 and logs [cite: 4, 5]
+# Custom policy for App Runner to access S3 and logs
 resource "aws_iam_role_policy" "apprunner_instance_policy" {
   name = "${var.service_name}-instance-policy"
   role = aws_iam_role.apprunner_instance_role.id
@@ -78,23 +66,17 @@ resource "aws_iam_role_policy" "apprunner_instance_policy" {
   })
 }
 
-# VPC Connector pour permettre à App Runner de parler à MongoDB (ECS) 
+# VPC Connector pour permettre à App Runner de parler à MongoDB (ECS)
 resource "aws_apprunner_vpc_connector" "app_vpc_connector" {
   vpc_connector_name = "app-vpc-connector-g2-mg03"
   subnets            = var.subnet_ids
   security_groups    = var.sg_ids
-
-  tags = {
-    Name        = "AppRunnerVPCConnector"
-    Project     = "G2-MG03"
-  }
 }
 
-# 2. Le Service App Runner configuré pour l'API (HTTP)
+# Service App Runner configuré pour l'API (HTTP)
 resource "aws_apprunner_service" "service" {
   service_name = var.service_name
 
-  # Configuration réseau pour utiliser le VPC 
   network_configuration {
     egress_configuration {
       egress_type       = "VPC"
@@ -112,7 +94,6 @@ resource "aws_apprunner_service" "service" {
       image_repository_type = "ECR"
 
       image_configuration {
-        # MODIFICATION : Port de l'API FastAPI au lieu de Streamlit 
         port = "27099" 
         
         runtime_environment_variables = {
@@ -121,6 +102,7 @@ resource "aws_apprunner_service" "service" {
           "API_BASE_PORT" = "27099"
           "S3_BUCKET"     = "terraform-state-g2-mg03"
           "DB_NAME"       = "Steam_Project"
+          "RUN_DB_IMPORT" = "0" # Optionnel : éviter de réimporter à chaque restart
         }
       }
     }
@@ -128,14 +110,13 @@ resource "aws_apprunner_service" "service" {
   }
 
   instance_configuration {
-    cpu               = "4096"
-    memory            = "8192"
-    instance_role_arn = aws_iam_role.apprunner_instance_role.arn [cite: 9]
+    cpu               = "1024"
+    memory            = "2048"
+    instance_role_arn = aws_iam_role.apprunner_instance_role.arn
   }
 
   health_check_configuration {
     protocol            = "HTTP"
-    # MODIFICATION : On vérifie la route /docs pour valider le démarrage de l'API 
     path                = "/docs" 
     interval            = 20
     timeout             = 15
@@ -145,7 +126,6 @@ resource "aws_apprunner_service" "service" {
 
   tags = {
     Name        = var.service_name
-    Environment = "dev"
     Project     = "MLOps-G2MG03"
   }
 }
