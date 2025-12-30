@@ -21,7 +21,7 @@ init_database_async() {
   marker_file="/app/db_initialized"
   if [ "${RUN_DB_IMPORT:-1}" = "1" ] && [ ! -f "${marker_file}" ]; then
     echo "[INIT] Running DB_import.py..."
-    if uv run src/DB_import.py --workers 4 --log-level INFO; then
+    if uv run /app/src/DB_import.py --workers 4 --log-level INFO; then
       touch "$marker_file"
       echo "[INIT] DB import successful."
     fi
