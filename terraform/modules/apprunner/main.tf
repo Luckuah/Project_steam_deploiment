@@ -102,7 +102,7 @@ resource "aws_apprunner_service" "service" {
           "API_BASE_PORT" = "27099"
           "S3_BUCKET"     = "terraform-state-g2-mg03"
           "DB_NAME"       = "Steam_Project"
-          "RUN_DB_IMPORT" = "0" # Optionnel : éviter de réimporter à chaque restart
+          "RUN_DB_IMPORT" = "1" # Optionnel : éviter de réimporter à chaque restart
           "DB_USER" = "User"
           "DB_PASSWORD" = "Pass"
         }
