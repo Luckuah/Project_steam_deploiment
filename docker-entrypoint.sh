@@ -31,18 +31,6 @@ init_database_async() {
 # 1) Lancer l'initialisation de la DB en tâche de fond (&)
 init_database_async &
 
-# 2) Lancer l'API en tâche de fond (&)
-echo "[START] Starting API..."
-(
-  cd /app/src
-  uv run uvicorn API_DB:app --host 0.0.0.0 --port "${API_PORT}"
-) &
-
-# 3) Lancer Streamlit au PREMIER PLAN (C'est lui qui valide le déploiement)
-echo "[START] Starting Streamlit on port 8501..."
-exec uv run streamlit run src/Application/app.py \
-  --server.port 8501 \
-  --server.address 0.0.0.0 \
-  --server.headless true \
-  --server.enableCORS false \
-  --server.enableXsrfProtection false
+echo "[START] Starting API only on port ${API_PORT}..."
+cd /app/src
+exec uv run uvicorn API_DB:app --host 0.0.0.0 --port "${API_PORT}"

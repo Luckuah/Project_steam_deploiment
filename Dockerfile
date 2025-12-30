@@ -42,7 +42,6 @@ RUN uv venv .venv -p 3.13.7 && \
 RUN uv pip install boto3 requests pymongo rich
 
 # Expose app ports
-EXPOSE 8501
 EXPOSE 27099
 
 # Entrypoint script (starts DB init + API + Streamlit)
