@@ -107,10 +107,19 @@ import asyncio
 async def load_model_background():
     global NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device
     try:
-        # On lance le chargement lourd ici
-        NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(...)
+        logger.info("⏳ Début du chargement du modèle NLGCL en tâche de fond...")
+        
+        # REMPLACE LA LIGNE QUI CRASH PAR CELLE-CI :
+        NLGCL_model, NLGCL_dataset, NLGCL_train_data, NLGCL_device = setup_recbole_model(
+            model_path=normalize_path("NLGCL/saved/NLGCL-Dec-02-2025_17-09-34.pth"),
+            dataset_name="game",
+            config_file_list=[normalize_path("NLGCL/properties/game.yaml")]
+        )
+        
+        logger.info("✅ Modèle NLGCL chargé avec succès !")
     except Exception as e:
-        logger.error(f"❌ Erreur: {e}")
+        logger.error(f"❌ Erreur lors du chargement du modèle : {e}")
+        
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
