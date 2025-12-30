@@ -31,7 +31,6 @@ It highlights that each major component runs within its own container, managed b
 
 This containerization approach ensures that the application is **portable**, **scalable**, and that dependencies for each service are kept isolated. Communication between these components happens over the Docker network.
 
-Absolument. Je vais vous fournir la description du contenu de `start.sh` et de `docker-entrypoint.sh` en utilisant le même format et en m'appuyant sur les fichiers et diagrammes que vous avez fournis.
 
 
 ### 3\. The `docker-entrypoint.sh` Script (Docker Initialization)
