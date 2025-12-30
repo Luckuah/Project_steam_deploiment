@@ -39,7 +39,7 @@ module "vpc_G2MG03" {
 # 2. Sécurité
 resource "aws_security_group" "mongo_sg" {
   name        = "api-sg-g2-mg03"
-  description = "Autorise le flux entre App Runner, l'API et MongoDB"
+  description = "Allow traffic between App Runner, API and MongoDB"
   vpc_id      = module.vpc_G2MG03.vpc_id
 
   ingress {
